@@ -1,0 +1,92 @@
+# winfile.py - v1.1
+import customtkinter as ctk
+import os
+import importlib.util
+from pathlib import Path
+from tkinterdnd2 import DND_FILES, TkinterDnD
+
+# --- Variabile globale per accedere all'istanza dell'app ---
+app_instance = None
+
+class WinFileApp(ctk.CTkFrame):
+    def __init__(self, master):
+        super().__init__(master)
+        
+        # Dizionario per memorizzare le istanze delle app caricate
+        self.app_instances = {} 
+
+        # --- Creazione del Gestore di Schede (Tab View) ---
+        self.tab_view = ctk.CTkTabview(self, anchor="nw")
+        self.tab_view.pack(padx=10, pady=10, fill="both", expand=True)
+
+        # --- Caricamento Dinamico delle App ---
+        self.load_apps()
+
+    def load_apps(self):
+        """
+        Scandaglia la cartella 'apps', importa ogni modulo e chiama la funzione
+        'create_tab', che ora restituisce l'istanza dell'app creata.
+        """
+        apps_path = Path("apps")
+        
+        if not apps_path.is_dir():
+            print(f"Errore: La cartella '{apps_path}' non è stata trovata.")
+            return
+
+        for file_path in apps_path.glob("app_*.py"):
+            module_name = file_path.stem
+            
+            try:
+                spec = importlib.util.spec_from_file_location(module_name, file_path)
+                app_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(app_module)
+
+                if hasattr(app_module, "create_tab"):
+                    # La funzione ora restituisce il nome della scheda e l'istanza dell'app
+                    tab_name, instance = app_module.create_tab(self.tab_view)
+                    if tab_name and instance:
+                        # Memorizziamo l'istanza usando il nome della scheda come chiave
+                        self.app_instances[tab_name] = instance
+                        print(f"Modulo '{module_name}' caricato con successo.")
+                else:
+                    print(f"Attenzione: Il modulo '{module_name}' non ha una funzione 'create_tab'.")
+
+            except Exception as e:
+                print(f"Errore durante il caricamento del modulo '{module_name}': {e}")
+
+def handle_global_drop(event):
+    """
+    Questa funzione viene chiamata quando un file viene trascinato sulla finestra.
+    Controlla quale scheda è attiva e inoltra l'evento all'istanza corretta.
+    """
+    global app_instance
+    if not app_instance:
+        return
+
+    active_tab_name = app_instance.tab_view.get()
+    
+    if active_tab_name in app_instance.app_instances:
+        target_app = app_instance.app_instances[active_tab_name]
+        
+        # Se l'istanza dell'app ha un metodo 'handle_drop', lo chiamiamo
+        if hasattr(target_app, 'handle_drop') and callable(getattr(target_app, 'handle_drop')):
+            target_app.handle_drop(event)
+
+# --- Avvio dell'Applicazione ---
+if __name__ == "__main__":
+    root = TkinterDnD.Tk()
+    root.title("WinFile v1.1")
+    root.geometry("1200x700")
+    root.minsize(800, 600)
+
+    ctk.set_appearance_mode("System") 
+    ctk.set_default_color_theme("blue")
+
+    app_instance = WinFileApp(master=root)
+    app_instance.pack(fill="both", expand=True)
+
+    # Registra l'intera finestra come area di rilascio
+    root.drop_target_register(DND_FILES)
+    root.dnd_bind('<<Drop>>', handle_global_drop)
+
+    root.mainloop()
