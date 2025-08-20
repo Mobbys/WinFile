@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.7 (PySide6) - Correzione freccia tema scuro
+# app_liste_anteprime.py - v4.7 (PySide6) - Migliorata esportazione PDF
 import os
 import traceback
 import webbrowser
@@ -17,14 +17,14 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QTreeWidget, QTreeWidgetItem, QLabel, QFileDialog,
                                QMessageBox, QHeaderView, QSplitter, QMenu, QDialog,
                                QRadioButton, QSpinBox, QDialogButtonBox, QTreeWidgetItemIterator,
-                               QStyleFactory) # Aggiunto QStyleFactory
+                               QStyleFactory)
 from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread, QMimeData
 from PySide6.QtGui import QPixmap, QImage, QGuiApplication
 from PIL import Image
 import fitz  # PyMuPDF
 
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image as ReportLabImage, Paragraph, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image as ReportLabImage, Paragraph, PageBreak, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.lib.pagesizes import A4, landscape
@@ -113,9 +113,6 @@ class FileScannerApp(QWidget):
         self.export_pdf_button.setEnabled(False)
         
         self.tree = QTreeWidget()
-        # --- MODIFICA CHIAVE ---
-        # Applica lo stile "Fusion" solo a questo widget per garantire la visibilità
-        # delle frecce di espansione nel tema scuro.
         self.tree.setStyle(QStyleFactory.create('Fusion'))
         
         self.tree.setColumnCount(3)
@@ -188,13 +185,12 @@ class FileScannerApp(QWidget):
         if not selected_items:
             return
 
-        # Identifica i file unici associati alla selezione
         files_to_remove = set()
         for item in selected_items:
             parent = item.parent()
-            if parent:  # È una pagina, quindi risale al file genitore
+            if parent:
                 full_path = parent.data(0, Qt.ItemDataRole.UserRole)
-            else:  # È già un file
+            else:
                 full_path = item.data(0, Qt.ItemDataRole.UserRole)
             
             if full_path:
@@ -211,7 +207,6 @@ class FileScannerApp(QWidget):
         if reply == QMessageBox.StandardButton.No:
             return
 
-        # Trova e rimuove gli item di primo livello corrispondenti ai file da eliminare
         items_to_take = []
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
@@ -222,7 +217,6 @@ class FileScannerApp(QWidget):
             index = self.tree.indexOfTopLevelItem(item)
             self.tree.takeTopLevelItem(index)
 
-        # Pulisce il dizionario dei dati
         for path in files_to_remove:
             if path in self.scan_results:
                 del self.scan_results[path]
@@ -230,7 +224,6 @@ class FileScannerApp(QWidget):
         self.status_label.setText(f"{len(files_to_remove)} file rimossi dalla lista.")
         
         if not self.scan_results:
-            # Disabilita i pulsanti se la lista è vuota
             for button in [self.clear_button, self.copy_all_button, self.copy_formatted_button, self.print_button, self.export_html_button, self.export_pdf_button]:
                 button.setEnabled(False)
 
@@ -380,7 +373,6 @@ class FileScannerApp(QWidget):
             plain_text_lines = ["\t".join(header)] + ["\t".join(map(str, row)) for row in rows]
             QGuiApplication.clipboard().setText("\n".join(plain_text_lines))
         else:
-            # Stili in linea per massima compatibilità
             table_html = '<table border="1" style="border-collapse: collapse; width: 100%; font-family: sans-serif;">'
             table_html += '<thead style="background-color: #e0e0e0;"><tr>'
             for h in header:
@@ -404,7 +396,6 @@ class FileScannerApp(QWidget):
                 if os.name == 'nt':
                     self._set_clipboard_html_windows(table_html)
                 else:
-                    # Fallback per sistemi non-Windows
                     mime_data = QMimeData()
                     mime_data.setHtml(table_html)
                     QGuiApplication.clipboard().setMimeData(mime_data)
@@ -415,7 +406,6 @@ class FileScannerApp(QWidget):
                 traceback.print_exc()
 
     def _set_clipboard_html_windows(self, html_fragment: str):
-        """Mette una stringa HTML negli appunti di Windows usando ctypes."""
         if os.name != 'nt':
             raise NotImplementedError("Questa funzione è solo per Windows.")
 
@@ -672,13 +662,27 @@ class FileScannerApp(QWidget):
         
         page_size = landscape(A4) if options['orientation'] == 'landscape' else A4
         doc = SimpleDocTemplate(path, pagesize=page_size, topMargin=1.5*cm, bottomMargin=1.5*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
+        
         styles = getSampleStyleSheet()
+        filename_style = ParagraphStyle('file_style', parent=styles['Normal'], fontSize=8, alignment=1)
+        dims_style = ParagraphStyle('dims_style', parent=styles['Normal'], fontSize=7, textColor=colors.darkgrey, alignment=1)
+        folder_header_style = ParagraphStyle('folder_header', parent=styles['h2'], backColor=colors.lightblue, padding=4, textColor=colors.black)
+
         story = []
         num_columns = options['columns']
         col_width = (doc.width / num_columns) - (cm * 0.2 * (num_columns - 1))
         
         for folder, files_with_pages in sorted(grouped_results.items()):
-            story.append(Paragraph(self._get_display_path(files_with_pages[0]['file_info']), styles['h2']))
+            display_folder = self._get_display_path(files_with_pages[0]['file_info'])
+            num_files = len({f['file_info']['full_path'] for f in files_with_pages})
+            total_pages = sum(len(f['selected_pages']) for f in files_with_pages)
+            total_sqm = sum(f['file_info']['pages_details'][p_idx]['width_cm'] * f['file_info']['pages_details'][p_idx]['height_cm'] for f in files_with_pages for p_idx in f['selected_pages']) / 10000
+
+            stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
+            story.append(Paragraph(display_folder, folder_header_style))
+            story.append(Paragraph(stats_text, styles['Normal']))
+            story.append(Spacer(1, 0.5*cm))
+            
             grid_data = []; row = []
             
             for item_container in files_with_pages:
@@ -697,13 +701,20 @@ class FileScannerApp(QWidget):
                         cell_content.append(ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional'))
                     except Exception as e: print(f"Impossibile creare anteprima PDF: {e}")
                     page_info = f" (Pag. {page_num + 1}/{item_data['page_count']})" if item_data['page_count'] > 1 else ""
-                    cell_content.append(Paragraph(item_data['filename'] + page_info, styles['Normal']))
+                    cell_content.append(Paragraph(item_data['filename'] + page_info, filename_style))
+                    
+                    dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
+                    dims_text = item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}"
+                    cell_content.append(Paragraph(dims_text, dims_style))
+
                     row.append(cell_content)
                     if len(row) == num_columns: grid_data.append(row); row = []
             
             if row: row.extend([""] * (num_columns - len(row))); grid_data.append(row)
             if grid_data:
-                table = Table(grid_data, colWidths=[col_width] * num_columns); table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(table)
+                table = Table(grid_data, colWidths=[col_width] * num_columns)
+                table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('BOX', (0,0), (-1,-1), 1, colors.lightgrey), ('PADDING', (0,0), (-1,-1), 6)]))
+                story.append(table)
             story.append(PageBreak())
         
         if story and isinstance(story[-1], PageBreak): story.pop()
