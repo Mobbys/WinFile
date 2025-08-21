@@ -195,6 +195,7 @@ class FileScannerApp(ctk.CTkFrame):
         self.tree.grid(row=0, column=0, sticky="nsew"); scrollbar.grid(row=0, column=1, sticky="ns")
         self.tree.bind("<<TreeviewSelect>>", self.on_item_select)
         self.tree.bind("<Button-3>", self.show_context_menu)
+        self.tree.bind("<Double-1>", self.open_selected_file) # Aggiunto binding per doppio click
         
         preview_frame = ctk.CTkFrame(main_frame)
         preview_frame.grid(row=0, column=1, sticky="nsew")
@@ -268,6 +269,8 @@ class FileScannerApp(ctk.CTkFrame):
         self.context_menu.add_command(label="Esporta selezione in CSV", command=lambda: self.export_to_csv(selection_mode=True))
         self.context_menu.add_command(label="Crea Anteprima HTML...", command=lambda: self.export_to_html(selection_mode=True))
         self.context_menu.add_command(label="Esporta selezione in PDF", command=lambda: self.export_to_pdf(selection_mode=True))
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Rimuovi selezionati", command=self.remove_selected_items)
 
     def show_context_menu(self, event):
         if self.tree.selection():
@@ -483,6 +486,52 @@ class FileScannerApp(ctk.CTkFrame):
         except Exception as e:
             self.status_text.set(f"Impossibile generare anteprima per {selected_data['filename']}.")
             print(f"Errore anteprima: {e}"); self.preview_label.configure(image=None)
+
+    def open_selected_file(self, event):
+        """Apre il file selezionato con l'applicazione predefinita del sistema."""
+        selected_id = self.tree.focus()
+        if not selected_id:
+            return
+
+        if selected_id.startswith("file_"):
+            file_index = int(selected_id.split('_')[1])
+        else:
+            file_index = int(selected_id.split('_')[0])
+
+        try:
+            selected_data = self.scan_results[file_index]
+            full_path = os.path.join(selected_data['path'], selected_data['filename'])
+            
+            if os.path.exists(full_path):
+                os.startfile(os.path.realpath(full_path))
+            else:
+                messagebox.showerror("Errore", f"File non trovato:\n{full_path}", parent=self)
+        except IndexError:
+            print(f"Indice non valido per la selezione: {selected_id}")
+        except Exception as e:
+            messagebox.showerror("Errore Apertura File", f"Impossibile aprire il file.\n\nDettagli: {e}", parent=self)
+
+    def remove_selected_items(self):
+        """Rimuove i file selezionati dalla lista."""
+        selected_iids = self.tree.selection()
+        if not selected_iids:
+            messagebox.showinfo("Informazione", "Nessun file selezionato da rimuovere.", parent=self)
+            return
+
+        indices_to_remove = set()
+        for iid in selected_iids:
+            if iid.startswith("file_"):
+                index = int(iid.split('_')[1])
+            else:
+                index = int(iid.split('_')[0])
+            indices_to_remove.add(index)
+        
+        # Ricostruisce la lista dei risultati escludendo gli indici da rimuovere
+        self.scan_results = [item for i, item in enumerate(self.scan_results) if i not in indices_to_remove]
+        
+        # Ripopola la vista ad albero
+        self.repopulate_treeview()
+
 
     def get_pages_for_selection(self, selection_mode=False):
         """
@@ -986,3 +1035,4 @@ def create_tab(tab_view):
     
     # Restituisce il nome della scheda e l'istanza dell'app
     return tab_name, app_instance
+
