@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v1.6
+# app_liste_anteprime.py - v1.8
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -13,9 +13,6 @@ import tempfile
 import base64
 import csv
 import html
-
-# NOTA: L'import di DND_FILES non è necessario qui,
-# perché la registrazione dell'evento avviene nel file principale winfile.py
 
 # Import per la gestione avanzata degli appunti su Windows
 import ctypes
@@ -181,6 +178,27 @@ class FileScannerApp(ctk.CTkFrame):
         status_label = ctk.CTkLabel(status_bar, textvariable=self.status_text, anchor="w")
         status_label.pack(side="left", padx=10)
 
+    def _lock_ui(self):
+        """Disabilita i pulsanti durante un'operazione lunga per evitare input multipli."""
+        self.select_button.configure(state="disabled")
+        self.clear_button.configure(state="disabled")
+        self.copy_all_button.configure(state="disabled")
+        self.copy_formatted_button.configure(state="disabled")
+        self.print_button.configure(state="disabled")
+        self.export_html_button.configure(state="disabled")
+        self.export_pdf_button.configure(state="disabled")
+
+    def _unlock_ui(self):
+        """Riabilita i pulsanti dopo un'operazione, rispettando lo stato attuale (es. se ci sono risultati)."""
+        self.select_button.configure(state="normal")
+        state = "normal" if self.scan_results else "disabled"
+        self.clear_button.configure(state=state)
+        self.copy_all_button.configure(state=state)
+        self.copy_formatted_button.configure(state=state)
+        self.print_button.configure(state=state)
+        self.export_html_button.configure(state=state)
+        self.export_pdf_button.configure(state=state)
+
     def create_context_menu(self):
         self.context_menu = Menu(self, tearoff=0)
         self.context_menu.add_command(label="Copia selezione negli appunti", command=self.copy_selection_to_clipboard)
@@ -197,6 +215,13 @@ class FileScannerApp(ctk.CTkFrame):
 
     def style_treeview(self):
         style = ttk.Style()
+        
+        # --- CORREZIONE FONT ---
+        # Impostiamo esplicitamente la dimensione del font e l'altezza delle righe
+        # per evitare che vengano rimpiccioliti dalla finestra CustomTkinter.
+        font_size = 13
+        row_height = 28  # Aumentiamo l'altezza della riga per dare più spazio al testo
+        
         if ctk.get_appearance_mode() == "Dark":
             bg_color, text_color, field_bg_color = "#2B2B2B", "white", "#343638"
             selected_color, odd_row, even_row = "#1f6aa5", "#242424", "#2B2B2B"
@@ -205,10 +230,27 @@ class FileScannerApp(ctk.CTkFrame):
             selected_color, odd_row, even_row = "#3484d0", "#F7F7F7", "white"
         
         style.theme_use("default")
-        style.configure("Treeview", background=bg_color, foreground=text_color, fieldbackground=field_bg_color, borderwidth=0)
+        
+        # Applichiamo il font e l'altezza della riga
+        style.configure("Treeview", 
+                        background=bg_color, 
+                        foreground=text_color, 
+                        fieldbackground=field_bg_color, 
+                        borderwidth=0,
+                        font=("Segoe UI", font_size), # Font per le righe
+                        rowheight=row_height)
+                        
         style.map('Treeview', background=[('selected', selected_color)])
-        style.configure("Treeview.Heading", background=field_bg_color, foreground=text_color, relief="flat")
+        
+        # Applichiamo un font più grande e in grassetto per le intestazioni
+        style.configure("Treeview.Heading", 
+                        background=field_bg_color, 
+                        foreground=text_color, 
+                        relief="flat",
+                        font=("Segoe UI", font_size + 1, "bold")) # Font per le intestazioni
+                        
         style.map("Treeview.Heading", background=[('active', selected_color)])
+        
         self.tree.tag_configure('oddrow', background=odd_row)
         self.tree.tag_configure('evenrow', background=even_row)
 
@@ -246,6 +288,7 @@ class FileScannerApp(ctk.CTkFrame):
 
     def process_paths(self, paths):
         self.status_text.set("Scansione in corso...")
+        self._lock_ui()
         found_files = []
         for path in paths:
             scan_root = os.path.normpath(path)
@@ -310,11 +353,7 @@ class FileScannerApp(ctk.CTkFrame):
         self.status_text.set(f"Scansione completata. Trovati {len(self.scan_results)} file ({row_counter} righe).")
         self.preview_label.configure(image=None)
         
-        state = "normal" if self.scan_results else "disabled"
-        self.export_pdf_button.configure(state=state); self.export_html_button.configure(state=state)
-        self.copy_all_button.configure(state=state); self.clear_button.configure(state=state)
-        self.copy_formatted_button.configure(state=state); self.print_button.configure(state=state)
-        self.select_button.configure(state="normal")
+        self._unlock_ui()
         self.is_scanning = False
 
     def select_folder_dialog(self):
@@ -324,7 +363,6 @@ class FileScannerApp(ctk.CTkFrame):
 
     def run_scan(self, paths):
         self.is_scanning = True
-        self.select_button.configure(state="disabled")
         self.status_text.set("Avvio scansione...")
         scan_thread = threading.Thread(target=self.process_paths, args=(paths,), daemon=True)
         scan_thread.start()
@@ -334,11 +372,7 @@ class FileScannerApp(ctk.CTkFrame):
         for i in self.tree.get_children(): self.tree.delete(i)
         self.status_text.set("Lista svuotata. Pronto per una nuova scansione.")
         self.preview_label.configure(image=None)
-        
-        state = "disabled"
-        self.export_pdf_button.configure(state=state); self.export_html_button.configure(state=state)
-        self.copy_all_button.configure(state=state); self.clear_button.configure(state=state)
-        self.copy_formatted_button.configure(state=state); self.print_button.configure(state=state)
+        self._unlock_ui()
 
     def on_item_select(self, event):
         selected_items = self.tree.selection()
@@ -426,10 +460,13 @@ class FileScannerApp(ctk.CTkFrame):
         if not results_to_export:
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
             return
-
+        
+        self._lock_ui()
         file_path = filedialog.asksaveasfilename(parent=self, defaultextension=".csv", filetypes=[("File CSV", "*.csv")], title="Salva lista come CSV")
+        
         if not file_path:
             self.status_text.set("Esportazione CSV annullata.")
+            self._unlock_ui()
             return
 
         self.status_text.set("Creazione del file CSV in corso...")
@@ -458,11 +495,15 @@ class FileScannerApp(ctk.CTkFrame):
 
     def on_csv_success(self, file_path):
         self.status_text.set("File CSV creato con successo.")
+        self._unlock_ui()
+        self.update() # Forza il ridisegno della finestra
         messagebox.showinfo("Successo", f"Lista esportata con successo in:\n{file_path}", parent=self)
 
     def on_csv_error(self, e):
         traceback.print_exc()
         self.status_text.set("Errore durante la creazione del CSV.")
+        self._unlock_ui()
+        self.update() # Forza il ridisegno della finestra
         messagebox.showerror("Errore", f"Impossibile creare il file CSV.\nErrore: {e}", parent=self)
 
     def export_to_html(self, selection_mode=False):
@@ -471,6 +512,7 @@ class FileScannerApp(ctk.CTkFrame):
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
             return
 
+        self._lock_ui()
         self.status_text.set("Preparazione anteprima HTML in corso...")
         self.update_idletasks()
         
@@ -492,10 +534,14 @@ class FileScannerApp(ctk.CTkFrame):
     def on_html_success(self, file_path):
         webbrowser.open(f'file://{os.path.realpath(file_path)}')
         self.status_text.set("Anteprima HTML creata con successo.")
+        self._unlock_ui()
+        self.update()
 
     def on_html_error(self, e):
         traceback.print_exc()
         self.status_text.set("Errore durante la creazione dell'anteprima HTML.")
+        self._unlock_ui()
+        self.update()
         messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\nErrore: {e}", parent=self)
 
     def _generate_html_content(self, results):
@@ -632,14 +678,21 @@ class FileScannerApp(ctk.CTkFrame):
         if not results_to_export:
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self); return
 
+        self._lock_ui()
         options_dialog = ExportOptionsWindow(self)
         self.wait_window(options_dialog)
         options = options_dialog.result
+        
         if not options:
-            self.status_text.set("Esportazione annullata."); return
+            self.status_text.set("Esportazione annullata.")
+            self._unlock_ui()
+            return
 
         file_path = filedialog.asksaveasfilename(parent=self, defaultextension=".pdf", filetypes=[("File PDF", "*.pdf")], title="Salva report PDF")
-        if not file_path: return
+        if not file_path:
+            self.status_text.set("Esportazione PDF annullata.")
+            self._unlock_ui()
+            return
 
         self.status_text.set("Creazione del report PDF in corso...")
         self.update_idletasks()
@@ -722,11 +775,15 @@ class FileScannerApp(ctk.CTkFrame):
 
     def on_pdf_success(self, file_path):
         self.status_text.set("Report PDF creato con successo.")
+        self._unlock_ui()
+        self.update() # Forza il ridisegno della finestra
         messagebox.showinfo("Successo", f"Report esportato con successo in:\n{file_path}", parent=self)
 
     def on_pdf_error(self, e):
         traceback.print_exc()
         self.status_text.set("Errore durante la creazione del PDF.")
+        self._unlock_ui()
+        self.update() # Forza il ridisegno della finestra
         messagebox.showerror("Errore", f"Impossibile creare il PDF.\nErrore: {e}", parent=self)
 
 # --- Funzione di caricamento richiesta da winfile.py ---

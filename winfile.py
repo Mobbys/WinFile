@@ -1,9 +1,20 @@
-# winfile.py - v1.2
+# winfile.py - v1.4
 import customtkinter as ctk
 import os
 import importlib.util
 from pathlib import Path
 from tkinterdnd2 import DND_FILES, TkinterDnD
+
+# --- Classe Personalizzata per la Finestra Principale ---
+# Questa classe eredita sia da ctk.CTk (per l'interfaccia moderna) sia da
+# TkinterDnD.DnDWrapper (per aggiungere la funzionalità di drag and drop).
+# Questo approccio risolve le incompatibilità di rendering tra le due librerie,
+# prevenendo l'effetto "finestra trasparente" durante le operazioni bloccanti.
+class CTkRoot(ctk.CTk, TkinterDnD.DnDWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Questa linea è cruciale per inizializzare il sistema DnD sulla nuova finestra
+        self.TkdndVersion = TkinterDnD._require(self)
 
 # --- Variabile globale per accedere all'istanza dell'app principale ---
 app_instance = None
@@ -76,11 +87,15 @@ def handle_global_drop(event):
         if hasattr(target_app, 'handle_drop') and callable(getattr(target_app, 'handle_drop')):
             target_app.handle_drop(event)
 
-# ---  Avvio dell'Applicazione  ---
+# --- Avvio dell'Applicazione ---
 if __name__ == "__main__":
-    # Usiamo TkinterDnD.Tk() al posto di ctk.CTk() per abilitare il drag and drop
-    root = TkinterDnD.Tk()
-    root.title("WinFile v1.2")
+    # Usiamo la nostra nuova classe CTkRoot al posto di TkinterDnD.Tk()
+    root = CTkRoot()
+    
+    # La patch di compatibilità precedente non è più necessaria perché la nostra
+    # finestra principale è ora un oggetto CTk a tutti gli effetti.
+
+    root.title("WinFile v1.4")
     root.geometry("1200x700")
     root.minsize(800, 600)
 
