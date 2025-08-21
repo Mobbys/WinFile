@@ -25,7 +25,7 @@ class ImageCheckerApp(ctk.CTkFrame):
         self._is_updating_dimensions = False
 
         # --- Layout Principale ---
-        self.grid_columnconfigure(0, weight=0, minsize=120) # Colonna miniature (stretta, fissa)
+        self.grid_columnconfigure(0, weight=0, minsize=180) # Colonna miniature (stretta, fissa) - Aumentato da 120
         self.grid_columnconfigure(1, weight=1)              # Colonna contenuto principale (espandibile)
         self.grid_rowconfigure(0, weight=1)
 
@@ -180,7 +180,7 @@ class ImageCheckerApp(ctk.CTkFrame):
 
         for index, img_data in enumerate(self.loaded_images):
             img_copy = img_data["image_obj"].copy()
-            img_copy.thumbnail((80, 80), Image.Resampling.LANCZOS) # Miniatura più grande
+            img_copy.thumbnail((150, 150), Image.Resampling.LANCZOS) # Miniatura più grande - Aumentato da (80, 80)
             thumb_img = ctk.CTkImage(light_image=img_copy, dark_image=img_copy, size=img_copy.size)
             
             btn = ctk.CTkButton(self.thumbnail_list_frame, 

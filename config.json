@@ -1,0 +1,20 @@
+{
+    "window": {
+        "width": 1200,
+        "height": 700,
+        "min_width": 800,
+        "min_height": 600
+    },
+    "apps": [
+        {
+            "module": "app_liste_anteprime"
+        },
+        {
+            "module": "app_controllo_immagini"
+        }
+    ],
+    "theme": {
+        "appearance_mode": "Dark",
+        "color_theme": "blue"
+    }
+}

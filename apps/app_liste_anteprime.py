@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v2.5
+# app_liste_anteprime.py - v2.6
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -756,7 +756,20 @@ class FileScannerApp(ctk.CTkFrame):
         for page in pages_to_export:
             grouped_pages[page['file_info']['scan_root']].append(page)
             
-        file_colors = ['#DB4437', '#4285F4', '#F4B400', '#0F9D58', '#AB47BC']
+        file_colors = ['#DB4437', '#4285F4', '#F4B400', '#0F9D58', '#AB47BC', '#E91E63', '#9C27B0', '#673AB7', '#009688']
+        
+        # --- MODIFICA INIZIO ---
+        # Assegna un colore univoco a ogni file basandosi sul suo percorso completo.
+        # Questo assicura che tutte le pagine dello stesso file abbiano lo stesso colore.
+        file_path_to_color = {}
+        color_index = 0
+        # Crea una lista ordinata di percorsi di file unici per garantire un'assegnazione colori consistente
+        unique_file_paths = sorted(list(set(os.path.join(p['file_info']['path'], p['file_info']['filename']) for p in pages_to_export)))
+        
+        for path in unique_file_paths:
+            file_path_to_color[path] = file_colors[color_index % len(file_colors)]
+            color_index += 1
+        # --- MODIFICA FINE ---
         
         css = """<style id="page-orientation-style"></style><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');:root{--list-thumbnail-size:80px;--grid-item-width:200px}body{font-family:'Roboto',sans-serif;margin:0;background-color:#f4f4f4}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:15px;margin-bottom:20px;background:#fff;padding:10px 15px;border-radius:8px;box-shadow:0 2px 4px #0000001a;position:sticky;top:10px;z-index:1000}#printable-content{margin:20px auto;padding:15mm;background:#fff;box-shadow:0 0 10px #0000001a;box-sizing:border-box}.controls button,.controls select{padding:8px 12px;font-size:14px;background-color:#e9e9e9;color:#333;border:1px solid #ccc;border-radius:5px;cursor:pointer;font-weight:700}#search-box{padding:8px;border:1px solid #ccc;border-radius:5px;width:200px}.print-button{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group{display:flex;align-items:center;gap:5px}.view-switcher button.active{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group button.size-btn{width:35px;height:35px;font-size:18px;line-height:1}.folder-container{margin-bottom:20px}.folder-header{background-color:#e0e0e0;padding:10px;border-left:5px solid #4285f4;overflow:hidden}.folder-path{font-weight:700;font-size:1.2em;float:left}.folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}.grid-container{display:flex;flex-wrap:wrap;justify-content:center;gap:15px;margin-top:15px}.grid-container .item{width:var(--grid-item-width);display:flex;flex-direction:column;border:1px solid #ddd;border-radius:5px;padding:10px;text-align:center;background-color:#fff;page-break-inside:avoid;position:relative;overflow:hidden}.grid-container .item-img{max-width:100%;height:auto;border-radius:3px;object-fit:contain}.grid-container .item-info{text-align:center;flex-grow:1}.list-container{display:flex;flex-direction:column;gap:8px;margin-top:15px}.list-container .item{display:flex;align-items:center;border:1px solid #ddd;border-radius:5px;padding:8px;background-color:#fff;page-break-inside:avoid;position:relative}.list-container .item-img{width:var(--list-thumbnail-size);height:var(--list-thumbnail-size);object-fit:contain;border-radius:3px;margin-right:15px;flex-shrink:0}.list-container .item-info{flex-grow:1;text-align:left}.filename{font-size:.9em;font-weight:700;margin-top:5px;word-wrap:break-word}.dimensions{font-size:.8em;color:#777}.page-indicator{position:absolute;top:5px;right:5px;font-size:.7em;color:#fff;padding:2px 5px;border-radius:3px}.annotation-area{width:100%;box-sizing:border-box;margin-top:8px;padding:5px;border:1px dashed #ccc;border-radius:4px;font-family:sans-serif;resize:vertical;min-height:40px;font-size:14px;font-weight:700;color:#d32f2f}.folder-annotation{margin:10px 0;min-height:50px}.list-container .annotation-area{margin-left:15px}@media print{html,body{width:100%;height:100%;margin:0;padding:0}.controls{display:none}body{background-color:#fff}#printable-content{width:100%;margin:0;padding:0;box-shadow:none}.folder-header{background-color:#f0f0f0!important;-webkit-print-color-adjust:exact}.page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact}.annotation-area{border:1px solid #eee;resize:none;background-color:#fdfdfd!important;-webkit-print-color-adjust:exact}.hide-on-print{display:none!important}}</style>"""
         js_script = """<script>let state={view:"grid",gridItemWidth:200,listThumbSize:80};function switchView(e){if(state.view===e)return;state.view=e,document.querySelectorAll(".content-container").forEach(t=>{t.classList.remove("grid-container","list-container"),t.classList.add(e+"-container")}),document.getElementById("btn-grid").classList.toggle("active","grid"===e),document.getElementById("btn-list").classList.toggle("active","list"===e)}function changeSize(e){"grid"===state.view?(state.gridItemWidth=Math.max(80,Math.min(600,state.gridItemWidth+40*e)),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px")):(state.listThumbSize=Math.max(40,Math.min(200,state.listThumbSize+20*e)),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px"))}function updatePrintStyle(){let e=document.querySelector('input[name="orientation"]:checked').value;document.getElementById("page-orientation-style").innerHTML=`@page { size: A4 ${e}; margin: 1.5cm; }`;let t=document.getElementById("printable-content");t.style.width="portrait"===e?"180mm":"267mm"}function filterFiles(){let e=document.getElementById("search-box").value.toLowerCase();document.querySelectorAll(".folder-container").forEach(t=>{let i=t.querySelectorAll(".item"),l=0,n=0;i.forEach(t=>{let i=t.querySelector(".filename").textContent.toLowerCase();i.includes(e)?(t.style.display="flex",l++,n+=parseFloat(t.dataset.area)):t.style.display="none"});let a=t.querySelector(".folder-header"),s=t.querySelector(".folder-stats"),d=a.dataset.originalFiles,o=a.dataset.originalPages,r=a.dataset.originalSqm;""===e.trim()?s.textContent=`File: ${d} | Pagine: ${o} | Area: ${r} m²`:s.textContent=`File: ${l} (di ${d}) | Area: ${n.toFixed(2)} m²`,t.style.display=l>0?"":"none"})}function prepareAndPrint(){document.querySelectorAll(".annotation-area").forEach(e=>{e.classList.toggle("hide-on-print",""===e.value.trim())}),window.print()}document.addEventListener("DOMContentLoaded",()=>{switchView("grid"),updatePrintStyle(),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px"),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px")});</script>"""
@@ -772,12 +785,17 @@ class FileScannerApp(ctk.CTkFrame):
             
             body += f"""<div class="folder-container"><div class="folder-header" data-original-files="{num_files}" data-original-pages="{total_pages}" data-original-sqm="{total_sqm:.2f}"><span class="folder-stats">File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²</span><span class="folder-path">{display_folder}</span></div><textarea class="annotation-area folder-annotation" placeholder="Aggiungi un'annotazione per questa cartella..."></textarea><div class="content-container grid-container">"""
             
-            for page_index, page_data in enumerate(pages):
+            # --- MODIFICA INIZIO ---
+            # Rimosso enumerate() perché l'indice della pagina non serve più per il colore.
+            for page_data in pages:
                 item_data = page_data['file_info']
                 page_num = page_data['page_num']
                 full_path = os.path.join(item_data['path'], item_data['filename'])
                 page_count = item_data.get('page_count', 1)
-                current_color = file_colors[page_index % len(file_colors)]
+                
+                # Recupera il colore pre-assegnato per il file corrente.
+                current_color = file_path_to_color.get(full_path, '#808080') # Grigio di default se non trovato
+                # --- MODIFICA FINE ---
 
                 try:
                     page_details = item_data["pages_details"][page_num]
@@ -1035,4 +1053,3 @@ def create_tab(tab_view):
     
     # Restituisce il nome della scheda e l'istanza dell'app
     return tab_name, app_instance
-
