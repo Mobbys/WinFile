@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v1.8
+# app_liste_anteprime.py - v2.5
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -40,7 +40,8 @@ class ExportOptionsWindow(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Opzioni di Esportazione")
-        self.geometry("300x220")
+        # Modifica: Aumentata la larghezza per contenere tutto il testo
+        self.geometry("350x220")
         self.transient(parent)
         self.grab_set()
 
@@ -94,10 +95,16 @@ class FileScannerApp(ctk.CTkFrame):
         self.preview_image = None
         self.scan_results = []
         self.is_scanning = False
+        
+        self.bottom_button_groups = [] # Lista per i gruppi di pulsanti in basso
 
         self.create_widgets()
         self.create_context_menu()
         self.style_treeview()
+        
+        # Associa l'evento di ridimensionamento al frame dei controlli in basso
+        self.bottom_controls_frame.bind('<Configure>', self._rearrange_button_groups)
+
 
     def handle_drop(self, event):
         """
@@ -120,32 +127,55 @@ class FileScannerApp(ctk.CTkFrame):
             self.status_text.set("Nessun file o cartella valida trascinata.")
             print(f"DEBUG: Impossibile interpretare i percorsi da event.data: '{event.data}'")
 
+    def _rearrange_button_groups(self, event=None):
+        """
+        Riorganizza i gruppi di pulsanti in basso in modo reattivo (a capo)
+        in base alla larghezza disponibile del frame contenitore.
+        """
+        if not self.winfo_viewable():
+            return
+            
+        available_width = self.bottom_controls_frame.winfo_width()
+        padding_x = 2
+        padding_y = 2
+        
+        cursor_x = padding_x
+        cursor_y = padding_y
+        row_height = 0
+
+        for group in self.bottom_button_groups:
+            group_width = group.winfo_reqwidth()
+            group_height = group.winfo_reqheight()
+
+            if cursor_x + group_width + padding_x > available_width and cursor_x > padding_x:
+                # Sposta il gruppo a una nuova riga
+                cursor_y += row_height + padding_y
+                cursor_x = padding_x
+                row_height = 0
+
+            group.place(x=cursor_x, y=cursor_y)
+            cursor_x += group_width + padding_x
+            
+            if group_height > row_height:
+                row_height = group_height
+
+        # Adatta l'altezza del frame contenitore
+        required_height = cursor_y + row_height + padding_y
+        if self.bottom_controls_frame.winfo_reqheight() != required_height:
+             self.bottom_controls_frame.configure(height=required_height)
+
 
     def create_widgets(self):
+        # --- Frame Superiore (solo gestione lista) ---
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", padx=10, pady=(10, 5))
-
+        
         self.select_button = ctk.CTkButton(top_frame, text="Aggiungi Cartella", command=self.select_folder_dialog)
-        self.select_button.pack(side="left", padx=(0, 5))
-        
+        self.select_button.pack(side="left", padx=5, pady=5)
         self.clear_button = ctk.CTkButton(top_frame, text="Svuota Lista", command=self.clear_results, state="disabled")
-        self.clear_button.pack(side="left", padx=(0, 5))
-        
-        self.copy_all_button = ctk.CTkButton(top_frame, text="Copia Tabella", command=self.copy_all_to_clipboard, state="disabled")
-        self.copy_all_button.pack(side="left", padx=(0, 5))
+        self.clear_button.pack(side="left", padx=5, pady=5)
 
-        self.copy_formatted_button = ctk.CTkButton(top_frame, text="Copia Formattata", command=lambda: self.copy_formatted_to_clipboard(selection_mode=False), state="disabled")
-        self.copy_formatted_button.pack(side="left", padx=(0, 5))
-
-        self.print_button = ctk.CTkButton(top_frame, text="Stampa Tabella", command=lambda: self.print_table(selection_mode=False), state="disabled")
-        self.print_button.pack(side="left", padx=(0, 5))
-
-        self.export_html_button = ctk.CTkButton(top_frame, text="Anteprima HTML", command=self.export_to_html, state="disabled")
-        self.export_html_button.pack(side="left", padx=(0, 5))
-
-        self.export_pdf_button = ctk.CTkButton(top_frame, text="Esporta in PDF", command=self.export_to_pdf, state="disabled")
-        self.export_pdf_button.pack(side="left", padx=(0, 10))
-
+        # --- Frame Centrale (Lista e Anteprima) ---
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=10, pady=5)
         main_frame.grid_columnconfigure(0, weight=3); main_frame.grid_columnconfigure(1, weight=1); main_frame.grid_rowconfigure(0, weight=1)
@@ -155,24 +185,49 @@ class FileScannerApp(ctk.CTkFrame):
         tree_frame.grid_rowconfigure(0, weight=1); tree_frame.grid_columnconfigure(0, weight=1)
 
         columns = ("filename", "dimensions_cm", "path")
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings")
+        self.tree.column("#0", width=30, stretch=False, anchor="center")
+        self.tree.heading("#0", text="")
         self.tree.heading("filename", text="Nome File / Pagina"); self.tree.heading("dimensions_cm", text="Dimensioni (cm)"); self.tree.heading("path", text="Percorso")
         self.tree.column("filename", width=300); self.tree.column("dimensions_cm", width=150, anchor="center"); self.tree.column("path", width=350)
-
         scrollbar = ctk.CTkScrollbar(tree_frame, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
-        
         self.tree.grid(row=0, column=0, sticky="nsew"); scrollbar.grid(row=0, column=1, sticky="ns")
-        
         self.tree.bind("<<TreeviewSelect>>", self.on_item_select)
         self.tree.bind("<Button-3>", self.show_context_menu)
         
         preview_frame = ctk.CTkFrame(main_frame)
         preview_frame.grid(row=0, column=1, sticky="nsew")
-
         self.preview_label = ctk.CTkLabel(preview_frame, text="")
         self.preview_label.pack(fill="both", expand=True, padx=5, pady=5)
 
+        # --- Frame Inferiore (Controlli Copia ed Esporta) ---
+        self.bottom_controls_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.bottom_controls_frame.pack(fill="x", padx=10, pady=5)
+
+        # Gruppo Copia
+        copy_frame = ctk.CTkFrame(self.bottom_controls_frame)
+        ctk.CTkLabel(copy_frame, text="Copia").pack(anchor="w", pady=(2, 2), padx=10)
+        self.copy_all_button = ctk.CTkButton(copy_frame, text="Copia Tabella", command=self.copy_all_to_clipboard, state="disabled")
+        self.copy_all_button.pack(side="left", padx=5, pady=(0, 5))
+        self.copy_formatted_button = ctk.CTkButton(copy_frame, text="Copia Formattata", command=lambda: self.copy_formatted_to_clipboard(selection_mode=False), state="disabled")
+        self.copy_formatted_button.pack(side="left", padx=5, pady=(0, 5))
+        self.bottom_button_groups.append(copy_frame)
+
+        # Gruppo Esporta/Stampa
+        export_frame = ctk.CTkFrame(self.bottom_controls_frame)
+        ctk.CTkLabel(export_frame, text="Esporta / Stampa").pack(anchor="w", pady=(2, 2), padx=10)
+        self.print_button = ctk.CTkButton(export_frame, text="Stampa Tabella", command=lambda: self.print_table(selection_mode=False), state="disabled")
+        self.print_button.pack(side="left", padx=5, pady=(0, 5))
+        self.export_html_button = ctk.CTkButton(export_frame, text="Anteprima HTML", command=self.export_to_html, state="disabled")
+        self.export_html_button.pack(side="left", padx=5, pady=(0, 5))
+        self.export_csv_button = ctk.CTkButton(export_frame, text="Esporta in CSV", command=lambda: self.export_to_csv(selection_mode=False), state="disabled")
+        self.export_csv_button.pack(side="left", padx=5, pady=(0, 5))
+        self.export_pdf_button = ctk.CTkButton(export_frame, text="Esporta in PDF", command=self.export_to_pdf, state="disabled")
+        self.export_pdf_button.pack(side="left", padx=5, pady=(0, 5))
+        self.bottom_button_groups.append(export_frame)
+
+        # --- Barra di Stato ---
         status_bar = ctk.CTkFrame(self, height=30)
         status_bar.pack(side="bottom", fill="x", padx=10, pady=(5, 10))
         status_label = ctk.CTkLabel(status_bar, textvariable=self.status_text, anchor="w")
@@ -187,6 +242,7 @@ class FileScannerApp(ctk.CTkFrame):
         self.print_button.configure(state="disabled")
         self.export_html_button.configure(state="disabled")
         self.export_pdf_button.configure(state="disabled")
+        self.export_csv_button.configure(state="disabled")
 
     def _unlock_ui(self):
         """Riabilita i pulsanti dopo un'operazione, rispettando lo stato attuale (es. se ci sono risultati)."""
@@ -198,8 +254,12 @@ class FileScannerApp(ctk.CTkFrame):
         self.print_button.configure(state=state)
         self.export_html_button.configure(state=state)
         self.export_pdf_button.configure(state=state)
+        self.export_csv_button.configure(state=state)
 
     def create_context_menu(self):
+        font_size = 13
+        self.option_add("*Menu.font", ("Segoe UI", font_size))
+        
         self.context_menu = Menu(self, tearoff=0)
         self.context_menu.add_command(label="Copia selezione negli appunti", command=self.copy_selection_to_clipboard)
         self.context_menu.add_command(label="Copia selezione formattata", command=lambda: self.copy_formatted_to_clipboard(selection_mode=True))
@@ -216,11 +276,8 @@ class FileScannerApp(ctk.CTkFrame):
     def style_treeview(self):
         style = ttk.Style()
         
-        # --- CORREZIONE FONT ---
-        # Impostiamo esplicitamente la dimensione del font e l'altezza delle righe
-        # per evitare che vengano rimpiccioliti dalla finestra CustomTkinter.
         font_size = 13
-        row_height = 28  # Aumentiamo l'altezza della riga per dare più spazio al testo
+        row_height = 28
         
         if ctk.get_appearance_mode() == "Dark":
             bg_color, text_color, field_bg_color = "#2B2B2B", "white", "#343638"
@@ -231,23 +288,21 @@ class FileScannerApp(ctk.CTkFrame):
         
         style.theme_use("default")
         
-        # Applichiamo il font e l'altezza della riga
         style.configure("Treeview", 
                         background=bg_color, 
                         foreground=text_color, 
                         fieldbackground=field_bg_color, 
                         borderwidth=0,
-                        font=("Segoe UI", font_size), # Font per le righe
+                        font=("Segoe UI", font_size),
                         rowheight=row_height)
                         
         style.map('Treeview', background=[('selected', selected_color)])
         
-        # Applichiamo un font più grande e in grassetto per le intestazioni
         style.configure("Treeview.Heading", 
                         background=field_bg_color, 
                         foreground=text_color, 
                         relief="flat",
-                        font=("Segoe UI", font_size + 1, "bold")) # Font per le intestazioni
+                        font=("Segoe UI", font_size + 1, "bold"))
                         
         style.map("Treeview.Heading", background=[('active', selected_color)])
         
@@ -334,23 +389,40 @@ class FileScannerApp(ctk.CTkFrame):
         except ValueError: return os.path.basename(normalized_path)
 
     def repopulate_treeview(self):
-        for i in self.tree.get_children(): self.tree.delete(i)
+        """
+        Popola il Treeview con una struttura gerarchica per i file multi-pagina.
+        """
+        for i in self.tree.get_children():
+            self.tree.delete(i)
         
-        row_counter = 0
+        total_rows = 0
         for file_index, file_info in enumerate(self.scan_results):
             page_count = file_info.get('page_count', 1)
             tag = 'evenrow' if file_index % 2 == 0 else 'oddrow'
             
-            for page_num in range(page_count):
-                page_details = file_info["pages_details"][page_num]
-                filename_display = file_info['filename'] if page_num == 0 else f"   Pagina {page_num + 1}"
-                display_path = self._get_display_path(file_info).replace('\\', '/') if page_num == 0 else ""
+            if page_count > 1:
+                parent_id = f"file_{file_index}"
+                filename_display = f"{file_info['filename']} ({page_count} pagine)"
+                display_path = self._get_display_path(file_info).replace('\\', '/')
+                self.tree.insert("", "end", iid=parent_id, values=(filename_display, "Multi-pagina", display_path), tags=(tag,), open=False)
+                
+                for page_num in range(page_count):
+                    page_details = file_info["pages_details"][page_num]
+                    child_filename_display = f"   Pagina {page_num + 1}"
+                    child_dimensions_display = page_details["dimensions_cm"]
+                    child_id = f"{file_index}_{page_num}"
+                    self.tree.insert(parent_id, "end", iid=child_id, values=(child_filename_display, child_dimensions_display, ""), tags=(tag,))
+                total_rows += page_count
+            else:
+                page_details = file_info["pages_details"][0]
+                filename_display = file_info['filename']
+                display_path = self._get_display_path(file_info).replace('\\', '/')
                 dimensions_display = page_details["dimensions_cm"]
-                item_id = f"{file_index}_{page_num}"
+                item_id = f"{file_index}_0"
                 self.tree.insert("", "end", iid=item_id, values=(filename_display, dimensions_display, display_path), tags=(tag,))
-                row_counter += 1
+                total_rows += 1
 
-        self.status_text.set(f"Scansione completata. Trovati {len(self.scan_results)} file ({row_counter} righe).")
+        self.status_text.set(f"Scansione completata. Trovati {len(self.scan_results)} file ({total_rows} pagine/elementi).")
         self.preview_label.configure(image=None)
         
         self._unlock_ui()
@@ -375,12 +447,23 @@ class FileScannerApp(ctk.CTkFrame):
         self._unlock_ui()
 
     def on_item_select(self, event):
+        """
+        Gestisce la selezione di un elemento nella lista per mostrare l'anteprima.
+        Funziona sia per le righe madri che per le pagine figlie.
+        """
         selected_items = self.tree.selection()
         if not selected_items: return
         
         selected_id = selected_items[0]
-        file_index_str, page_num_str = selected_id.split('_')
-        item_index = int(file_index_str); page_to_show = int(page_num_str)
+        
+        if selected_id.startswith("file_"):
+            file_index_str = selected_id.split('_')[1]
+            item_index = int(file_index_str)
+            page_to_show = 0
+        else:
+            file_index_str, page_num_str = selected_id.split('_')
+            item_index = int(file_index_str)
+            page_to_show = int(page_num_str)
         
         selected_data = self.scan_results[item_index]
         full_path = os.path.join(selected_data['path'], selected_data['filename'])
@@ -401,19 +484,73 @@ class FileScannerApp(ctk.CTkFrame):
             self.status_text.set(f"Impossibile generare anteprima per {selected_data['filename']}.")
             print(f"Errore anteprima: {e}"); self.preview_label.configure(image=None)
 
-    def get_data_for_selection(self, selection_mode=False):
-        if not selection_mode: return self.scan_results
+    def get_pages_for_selection(self, selection_mode=False):
+        """
+        Restituisce una lista di dizionari, ognuno rappresentante una pagina
+        da esportare. Contiene i dati del file originale e il numero di pagina.
+        """
+        pages_to_export = []
+        
+        if not selection_mode:
+            for file_index, file_info in enumerate(self.scan_results):
+                for page_num in range(file_info.get('page_count', 1)):
+                    pages_to_export.append({'file_info': file_info, 'page_num': page_num})
+            return pages_to_export
+
         selected_iids = self.tree.selection()
-        if not selected_iids: return []
-        file_indices_to_export = {int(iid.split('_')[0]) for iid in selected_iids}
-        return [self.scan_results[i] for i in sorted(list(file_indices_to_export))]
+        if not selected_iids:
+            return []
+
+        unique_pages = set()
+
+        for iid in selected_iids:
+            if iid.startswith("file_"):
+                file_index = int(iid.split('_')[1])
+                file_info = self.scan_results[file_index]
+                for page_num in range(file_info.get('page_count', 1)):
+                    unique_pages.add((file_index, page_num))
+            else:
+                file_index, page_num = map(int, iid.split('_'))
+                unique_pages.add((file_index, page_num))
+                
+        for file_index, page_num in sorted(list(unique_pages)):
+            pages_to_export.append({'file_info': self.scan_results[file_index], 'page_num': page_num})
+            
+        return pages_to_export
+
+    def _get_all_data_rows(self):
+        """Funzione di supporto per ottenere tutti gli ID delle righe di dati (pagine o file singoli)."""
+        data_rows = []
+        for parent_id in self.tree.get_children(""):
+            if parent_id.startswith("file_"):
+                data_rows.extend(self.tree.get_children(parent_id))
+            else:
+                data_rows.append(parent_id)
+        return data_rows
+
+    def _get_data_rows_from_selection(self, selected_iids):
+        """Funzione di supporto per ottenere gli ID delle righe di dati da una selezione."""
+        data_rows = []
+        for iid in selected_iids:
+            if iid.startswith("file_"):
+                data_rows.extend(self.tree.get_children(iid))
+            else:
+                data_rows.append(iid)
+        return sorted(list(set(data_rows)))
 
     def copy_all_to_clipboard(self):
         if not self.scan_results: return
         header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso"]
         lines = ["\t".join(header)]
-        for item_id in self.tree.get_children():
-            values = self.tree.item(item_id)['values']
+        
+        all_data_rows = self._get_all_data_rows()
+        
+        for item_id in all_data_rows:
+            values = list(self.tree.item(item_id)['values'])
+            if not values[2]:
+                file_index = int(item_id.split('_')[0])
+                file_info = self.scan_results[file_index]
+                values[2] = self._get_display_path(file_info).replace('\\', '/')
             lines.append("\t".join(map(str, values)))
         
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
@@ -424,18 +561,26 @@ class FileScannerApp(ctk.CTkFrame):
         if not selected_items: return
         header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso"]
         lines = ["\t".join(header)]
-        for item_id in selected_items:
-            values = self.tree.item(item_id)['values']
+        
+        items_to_copy = self._get_data_rows_from_selection(selected_items)
+        
+        for item_id in items_to_copy:
+            values = list(self.tree.item(item_id)['values'])
+            if not values[2]:
+                file_index = int(item_id.split('_')[0])
+                file_info = self.scan_results[file_index]
+                values[2] = self._get_display_path(file_info).replace('\\', '/')
             lines.append("\t".join(map(str, values)))
+
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
         self.status_text.set(f"Selezione copiata negli appunti ({len(lines)-1} righe).")
 
     def print_table(self, selection_mode=False):
-        item_ids = self.tree.selection() if selection_mode else self.tree.get_children()
-        if not item_ids:
+        pages_to_print = self.get_pages_for_selection(selection_mode)
+        if not pages_to_print:
             messagebox.showinfo("Informazione", "Nessuna riga da stampare.", parent=self); return
         
-        html_string = self._generate_html_table_with_totals(item_ids)
+        html_string = self._generate_html_table_with_totals(pages_to_print)
 
         html_content = f"""
         <!DOCTYPE html><html><head><meta charset='UTF-8'><title>Stampa Tabella</title>
@@ -456,8 +601,8 @@ class FileScannerApp(ctk.CTkFrame):
             messagebox.showerror("Errore di Stampa", f"Impossibile aprire l'anteprima di stampa.\nErrore: {e}", parent=self)
 
     def export_to_csv(self, selection_mode=False):
-        results_to_export = self.get_data_for_selection(selection_mode)
-        if not results_to_export:
+        pages_to_export = self.get_pages_for_selection(selection_mode)
+        if not pages_to_export:
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
             return
         
@@ -472,22 +617,25 @@ class FileScannerApp(ctk.CTkFrame):
         self.status_text.set("Creazione del file CSV in corso...")
         self.update_idletasks()
         
-        thread = threading.Thread(target=self._build_csv_thread, args=(file_path, results_to_export), daemon=True)
+        thread = threading.Thread(target=self._build_csv_thread, args=(file_path, pages_to_export), daemon=True)
         thread.start()
 
-    def _build_csv_thread(self, file_path, results):
+    def _build_csv_thread(self, file_path, pages_to_export):
         try:
             with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f, delimiter=';')
                 writer.writerow(["Nome File", "Tipo", "Pagina", "Dimensioni (cm)", "Area (m²)", "Percorso Relativo"])
                 
-                for item in results:
+                for page_data in pages_to_export:
+                    item = page_data['file_info']
+                    page_num = page_data['page_num']
+                    
                     display_path = self._get_display_path(item).replace('\\', '/')
-                    for page_num, page_details in enumerate(item['pages_details']):
-                        page_count = item.get('page_count', 1)
-                        area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
-                        page_str = f"{page_num + 1} di {page_count}"
-                        writer.writerow([item['filename'], item['type'], page_str, page_details['dimensions_cm'], f"{area_sqm:.4f}", display_path])
+                    page_details = item['pages_details'][page_num]
+                    page_count = item.get('page_count', 1)
+                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                    page_str = f"{page_num + 1} di {page_count}"
+                    writer.writerow([item['filename'], item['type'], page_str, page_details['dimensions_cm'], f"{area_sqm:.4f}", display_path])
             
             self.after(0, self.on_csv_success, file_path)
         except Exception as e:
@@ -496,19 +644,19 @@ class FileScannerApp(ctk.CTkFrame):
     def on_csv_success(self, file_path):
         self.status_text.set("File CSV creato con successo.")
         self._unlock_ui()
-        self.update() # Forza il ridisegno della finestra
+        self.update()
         messagebox.showinfo("Successo", f"Lista esportata con successo in:\n{file_path}", parent=self)
 
     def on_csv_error(self, e):
         traceback.print_exc()
         self.status_text.set("Errore durante la creazione del CSV.")
         self._unlock_ui()
-        self.update() # Forza il ridisegno della finestra
+        self.update()
         messagebox.showerror("Errore", f"Impossibile creare il file CSV.\nErrore: {e}", parent=self)
 
     def export_to_html(self, selection_mode=False):
-        results_to_export = self.get_data_for_selection(selection_mode)
-        if not results_to_export:
+        pages_to_export = self.get_pages_for_selection(selection_mode)
+        if not pages_to_export:
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
             return
 
@@ -516,12 +664,12 @@ class FileScannerApp(ctk.CTkFrame):
         self.status_text.set("Preparazione anteprima HTML in corso...")
         self.update_idletasks()
         
-        thread = threading.Thread(target=self._build_html_thread, args=(results_to_export,), daemon=True)
+        thread = threading.Thread(target=self._build_html_thread, args=(pages_to_export,), daemon=True)
         thread.start()
 
-    def _build_html_thread(self, results):
+    def _build_html_thread(self, pages_to_export):
         try:
-            html_content = self._generate_html_content(results)
+            html_content = self._generate_html_content(pages_to_export)
             
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
                 temp_file_path = f.name
@@ -532,10 +680,20 @@ class FileScannerApp(ctk.CTkFrame):
             self.after(0, self.on_html_error, e)
 
     def on_html_success(self, file_path):
-        webbrowser.open(f'file://{os.path.realpath(file_path)}')
-        self.status_text.set("Anteprima HTML creata con successo.")
-        self._unlock_ui()
-        self.update()
+        try:
+            # Usa os.startfile su Windows per un'apertura più affidabile
+            if os.name == 'nt':
+                os.startfile(os.path.realpath(file_path))
+            else:
+                # Fallback per altri sistemi operativi (macOS, Linux)
+                webbrowser.open(f'file://{os.path.realpath(file_path)}')
+            self.status_text.set("Anteprima HTML creata con successo.")
+        except Exception as e:
+            self.status_text.set("Errore nell'apertura dell'anteprima.")
+            messagebox.showerror("Errore Apertura", f"Impossibile aprire il file HTML nel browser.\n\nDettagli: {e}", parent=self)
+        finally:
+            self._unlock_ui()
+            self.update()
 
     def on_html_error(self, e):
         traceback.print_exc()
@@ -544,78 +702,103 @@ class FileScannerApp(ctk.CTkFrame):
         self.update()
         messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\nErrore: {e}", parent=self)
 
-    def _generate_html_content(self, results):
-        grouped_results = defaultdict(list)
-        for item in results: grouped_results[item['scan_root']].append(item)
+    def _generate_html_content(self, pages_to_export):
+        grouped_pages = defaultdict(list)
+        for page in pages_to_export:
+            grouped_pages[page['file_info']['scan_root']].append(page)
+            
         file_colors = ['#DB4437', '#4285F4', '#F4B400', '#0F9D58', '#AB47BC']
         
         css = """<style id="page-orientation-style"></style><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');:root{--list-thumbnail-size:80px;--grid-item-width:200px}body{font-family:'Roboto',sans-serif;margin:0;background-color:#f4f4f4}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:15px;margin-bottom:20px;background:#fff;padding:10px 15px;border-radius:8px;box-shadow:0 2px 4px #0000001a;position:sticky;top:10px;z-index:1000}#printable-content{margin:20px auto;padding:15mm;background:#fff;box-shadow:0 0 10px #0000001a;box-sizing:border-box}.controls button,.controls select{padding:8px 12px;font-size:14px;background-color:#e9e9e9;color:#333;border:1px solid #ccc;border-radius:5px;cursor:pointer;font-weight:700}#search-box{padding:8px;border:1px solid #ccc;border-radius:5px;width:200px}.print-button{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group{display:flex;align-items:center;gap:5px}.view-switcher button.active{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group button.size-btn{width:35px;height:35px;font-size:18px;line-height:1}.folder-container{margin-bottom:20px}.folder-header{background-color:#e0e0e0;padding:10px;border-left:5px solid #4285f4;overflow:hidden}.folder-path{font-weight:700;font-size:1.2em;float:left}.folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}.grid-container{display:flex;flex-wrap:wrap;justify-content:center;gap:15px;margin-top:15px}.grid-container .item{width:var(--grid-item-width);display:flex;flex-direction:column;border:1px solid #ddd;border-radius:5px;padding:10px;text-align:center;background-color:#fff;page-break-inside:avoid;position:relative;overflow:hidden}.grid-container .item-img{max-width:100%;height:auto;border-radius:3px;object-fit:contain}.grid-container .item-info{text-align:center;flex-grow:1}.list-container{display:flex;flex-direction:column;gap:8px;margin-top:15px}.list-container .item{display:flex;align-items:center;border:1px solid #ddd;border-radius:5px;padding:8px;background-color:#fff;page-break-inside:avoid;position:relative}.list-container .item-img{width:var(--list-thumbnail-size);height:var(--list-thumbnail-size);object-fit:contain;border-radius:3px;margin-right:15px;flex-shrink:0}.list-container .item-info{flex-grow:1;text-align:left}.filename{font-size:.9em;font-weight:700;margin-top:5px;word-wrap:break-word}.dimensions{font-size:.8em;color:#777}.page-indicator{position:absolute;top:5px;right:5px;font-size:.7em;color:#fff;padding:2px 5px;border-radius:3px}.annotation-area{width:100%;box-sizing:border-box;margin-top:8px;padding:5px;border:1px dashed #ccc;border-radius:4px;font-family:sans-serif;resize:vertical;min-height:40px;font-size:14px;font-weight:700;color:#d32f2f}.folder-annotation{margin:10px 0;min-height:50px}.list-container .annotation-area{margin-left:15px}@media print{html,body{width:100%;height:100%;margin:0;padding:0}.controls{display:none}body{background-color:#fff}#printable-content{width:100%;margin:0;padding:0;box-shadow:none}.folder-header{background-color:#f0f0f0!important;-webkit-print-color-adjust:exact}.page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact}.annotation-area{border:1px solid #eee;resize:none;background-color:#fdfdfd!important;-webkit-print-color-adjust:exact}.hide-on-print{display:none!important}}</style>"""
         js_script = """<script>let state={view:"grid",gridItemWidth:200,listThumbSize:80};function switchView(e){if(state.view===e)return;state.view=e,document.querySelectorAll(".content-container").forEach(t=>{t.classList.remove("grid-container","list-container"),t.classList.add(e+"-container")}),document.getElementById("btn-grid").classList.toggle("active","grid"===e),document.getElementById("btn-list").classList.toggle("active","list"===e)}function changeSize(e){"grid"===state.view?(state.gridItemWidth=Math.max(80,Math.min(600,state.gridItemWidth+40*e)),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px")):(state.listThumbSize=Math.max(40,Math.min(200,state.listThumbSize+20*e)),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px"))}function updatePrintStyle(){let e=document.querySelector('input[name="orientation"]:checked').value;document.getElementById("page-orientation-style").innerHTML=`@page { size: A4 ${e}; margin: 1.5cm; }`;let t=document.getElementById("printable-content");t.style.width="portrait"===e?"180mm":"267mm"}function filterFiles(){let e=document.getElementById("search-box").value.toLowerCase();document.querySelectorAll(".folder-container").forEach(t=>{let i=t.querySelectorAll(".item"),l=0,n=0;i.forEach(t=>{let i=t.querySelector(".filename").textContent.toLowerCase();i.includes(e)?(t.style.display="flex",l++,n+=parseFloat(t.dataset.area)):t.style.display="none"});let a=t.querySelector(".folder-header"),s=t.querySelector(".folder-stats"),d=a.dataset.originalFiles,o=a.dataset.originalPages,r=a.dataset.originalSqm;""===e.trim()?s.textContent=`File: ${d} | Pagine: ${o} | Area: ${r} m²`:s.textContent=`File: ${l} (di ${d}) | Area: ${n.toFixed(2)} m²`,t.style.display=l>0?"":"none"})}function prepareAndPrint(){document.querySelectorAll(".annotation-area").forEach(e=>{e.classList.toggle("hide-on-print",""===e.value.trim())}),window.print()}document.addEventListener("DOMContentLoaded",()=>{switchView("grid"),updatePrintStyle(),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px"),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px")});</script>"""
         body = """<body><div class="controls"><button onclick="prepareAndPrint()" class="print-button">Stampa Pagina</button><input type="text" id="search-box" onkeyup="filterFiles()" placeholder="Cerca per nome file..."><div class="control-group"><label>Orientamento:</label><input type="radio" id="portrait" name="orientation" value="portrait" checked onchange="updatePrintStyle()"><label for="portrait">Verticale</label><input type="radio" id="landscape" name="orientation" value="landscape" onchange="updatePrintStyle()"><label for="landscape">Orizzontale</label></div><div class="view-switcher control-group"><button id="btn-grid" onclick="switchView('grid')">Griglia</button><button id="btn-list" onclick="switchView('list')">Elenco</button></div><div class="size-controls control-group"><label>Dimensione:</label><button class="size-btn" onclick="changeSize(-1)">-</button><button class="size-btn" onclick="changeSize(1)">+</button></div></div><div id="printable-content">"""
         
-        for folder, files in sorted(grouped_results.items()):
-            display_folder = self._get_display_path(files[0]).replace('\\', '/')
-            num_files, total_pages = len(files), sum(f.get('page_count', 1) for f in files)
-            total_sqm = sum(pd['width_cm'] * pd['height_cm'] for f in files for pd in f['pages_details']) / 10000
+        for folder, pages in sorted(grouped_pages.items()):
+            display_folder = self._get_display_path(pages[0]['file_info']).replace('\\', '/')
+            
+            # Calcolo statistiche basato sulle pagine selezionate
+            num_files = len(set(p['file_info']['filename'] for p in pages))
+            total_pages = len(pages)
+            total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
             
             body += f"""<div class="folder-container"><div class="folder-header" data-original-files="{num_files}" data-original-pages="{total_pages}" data-original-sqm="{total_sqm:.2f}"><span class="folder-stats">File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²</span><span class="folder-path">{display_folder}</span></div><textarea class="annotation-area folder-annotation" placeholder="Aggiungi un'annotazione per questa cartella..."></textarea><div class="content-container grid-container">"""
             
-            for file_index, item_data in enumerate(files):
+            for page_index, page_data in enumerate(pages):
+                item_data = page_data['file_info']
+                page_num = page_data['page_num']
                 full_path = os.path.join(item_data['path'], item_data['filename'])
                 page_count = item_data.get('page_count', 1)
-                current_color = file_colors[file_index % len(file_colors)]
-                for page_num in range(page_count):
-                    try:
-                        page_details = item_data["pages_details"][page_num]
-                        area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                current_color = file_colors[page_index % len(file_colors)]
 
-                        if item_data['type'] in ('PDF', 'AI'):
-                            with fitz.open(full_path) as doc_pdf:
-                                page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
-                                img_data = pix.tobytes("png")
-                        else:
-                            with Image.open(full_path) as img:
-                                img.thumbnail((400, 400)); img_buffer = io.BytesIO()
-                                img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
-                        b64_img = base64.b64encode(img_data).decode('utf-8')
-                        img_src = f"data:image/png;base64,{b64_img}"
-                        
-                        dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
-                        
-                        body += f'<div class="item" data-area="{area_sqm}">'
-                        if page_count > 1: body += f'<div class="page-indicator" style="background-color: {current_color}; --bg-color: {current_color};">Pag. {page_num + 1}/{page_count}</div>'
-                        
-                        body += f'''<img class="item-img" src="{img_src}" alt="Anteprima"><div class="item-info" style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;"><div class="filename">{html.escape(item_data["filename"])}</div><div class="dimensions">{html.escape(page_details["dimensions_cm"])} cm {html.escape(dpi_info)}</div></div><textarea class="annotation-area" placeholder="Annotazione..."></textarea></div>'''
-                    except Exception as e: print(f"Impossibile creare anteprima HTML per {full_path}: {e}")
+                try:
+                    page_details = item_data["pages_details"][page_num]
+                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+
+                    if item_data['type'] in ('PDF', 'AI'):
+                        with fitz.open(full_path) as doc_pdf:
+                            page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
+                            img_data = pix.tobytes("png")
+                    else:
+                        with Image.open(full_path) as img:
+                            img.thumbnail((400, 400)); img_buffer = io.BytesIO()
+                            img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
+                    b64_img = base64.b64encode(img_data).decode('utf-8')
+                    img_src = f"data:image/png;base64,{b64_img}"
+                    
+                    dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
+                    
+                    body += f'<div class="item" data-area="{area_sqm}">'
+                    if page_count > 1: body += f'<div class="page-indicator" style="background-color: {current_color}; --bg-color: {current_color};">Pag. {page_num + 1}/{page_count}</div>'
+                    
+                    body += f'''<img class="item-img" src="{img_src}" alt="Anteprima"><div class="item-info" style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;"><div class="filename">{html.escape(item_data["filename"])}</div><div class="dimensions">{html.escape(page_details["dimensions_cm"])} cm {html.escape(dpi_info)}</div></div><textarea class="annotation-area" placeholder="Annotazione..."></textarea></div>'''
+                except Exception as e: print(f"Impossibile creare anteprima HTML per {full_path}, pagina {page_num + 1}: {e}")
             body += '</div></div>'
         
         body += '</div></body>'
         return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Anteprima Report</title>{css}{js_script}</head>{body}</html>"
 
-    def _generate_html_table_with_totals(self, item_ids):
-        if not item_ids: return ""
+    def _generate_html_table_with_totals(self, pages_to_export, include_headers_footers=True):
+        if not pages_to_export: return ""
         total_area = 0
-        html_string = '<table border="1" style="border-collapse: collapse; width: 100%; font-family: sans-serif;"><thead style="background-color: #e0e0e0;"><tr>'
-        headers = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso", "Area (m²)"]
-        for h in headers: html_string += f'<th style="padding: 5px; text-align: left;">{html.escape(h)}</th>'
-        html_string += '</tr></thead><tbody>'
-        for item_id in item_ids:
+        html_string = '<table border="1" style="border-collapse: collapse; width: 100%; font-family: sans-serif;">'
+        
+        if include_headers_footers:
+            html_string += '<thead style="background-color: #e0e0e0;"><tr>'
+            headers = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso", "Area (m²)"]
+            for h in headers: html_string += f'<th style="padding: 5px; text-align: left;">{html.escape(h)}</th>'
+            html_string += '</tr></thead>'
+
+        html_string += '<tbody>'
+        for page_data in pages_to_export:
             html_string += '<tr>'
-            values = self.tree.item(item_id)['values']
-            file_index_str, page_num_str = item_id.split('_')
-            file_info = self.scan_results[int(file_index_str)]
-            page_details = file_info["pages_details"][int(page_num_str)]
+            
+            file_info = page_data['file_info']
+            page_num = page_data['page_num']
+            page_details = file_info["pages_details"][page_num]
+            
+            page_count = file_info.get('page_count', 1)
+            filename_display = file_info['filename'] if page_count == 1 else f"   {file_info['filename']} (Pag. {page_num + 1})"
+            dimensions_display = page_details['dimensions_cm']
+            path_display = self._get_display_path(file_info).replace('\\', '/')
+
             width_cm, height_cm = page_details.get('width_cm', 0), page_details.get('height_cm', 0)
             area_sqm = (width_cm * height_cm) / 10000
             total_area += area_sqm
-            for i, value in enumerate(values):
-                cell_text = str(value)
-                style = 'padding: 5px; text-align: left;'
-                if i == 0 and cell_text.startswith("   "): style = 'padding: 5px; padding-left: 20px; text-align: left;'
-                html_string += f'<td style="{style}">{html.escape(cell_text)}</td>'
-            html_string += f'<td style="padding: 5px; text-align: left;">{area_sqm:.4f}</td></tr>'
+            
+            cell_style = 'padding: 5px; text-align: left;'
+            filename_style = 'padding: 5px; padding-left: 20px; text-align: left;' if page_count > 1 else cell_style
+
+            html_string += f'<td style="{filename_style}">{html.escape(filename_display)}</td>'
+            html_string += f'<td style="{cell_style}">{html.escape(dimensions_display)}</td>'
+            html_string += f'<td style="{cell_style}">{html.escape(path_display)}</td>'
+            html_string += f'<td style="{cell_style}">{area_sqm:.4f}</td></tr>'
+
         html_string += '</tbody>'
-        html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">Totale ({len(item_ids)} elementi)</td><td style="padding: 5px;">{total_area:.4f} m²</td></tr></tfoot></table>'
+        
+        if include_headers_footers:
+            html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">Totale ({len(pages_to_export)} elementi)</td><td style="padding: 5px;">{total_area:.4f} m²</td></tr></tfoot>'
+            
+        html_string += '</table>'
         return html_string
 
     def _set_clipboard_html(self, html_fragment: str):
@@ -660,22 +843,23 @@ class FileScannerApp(ctk.CTkFrame):
             if h_global_mem: kernel32.GlobalFree(h_global_mem)
 
     def copy_formatted_to_clipboard(self, selection_mode=False):
-        item_ids = self.tree.selection() if selection_mode else self.tree.get_children()
-        if not item_ids:
+        pages_to_copy = self.get_pages_for_selection(selection_mode)
+        if not pages_to_copy:
             self.status_text.set("Nessuna riga da copiare."); return
-        html_table = self._generate_html_table_with_totals(item_ids)
+            
+        html_table = self._generate_html_table_with_totals(pages_to_copy, include_headers_footers=True)
         if not html_table: return
         try:
             self._set_clipboard_html(html_table)
-            self.status_text.set(f"Tabella formattata ({len(item_ids)} righe) copiata negli appunti.")
+            self.status_text.set(f"Tabella formattata ({len(pages_to_copy)} righe) copiata negli appunti.")
         except Exception as e:
             self.status_text.set("Errore: Impossibile copiare la tabella formattata.")
             messagebox.showerror("Errore Appunti", f"Non è stato possibile copiare l'HTML negli appunti.\nDettagli: {e}", parent=self)
             traceback.print_exc()
 
     def export_to_pdf(self, selection_mode=False):
-        results_to_export = self.get_data_for_selection(selection_mode)
-        if not results_to_export:
+        pages_to_export = self.get_pages_for_selection(selection_mode)
+        if not pages_to_export:
             messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self); return
 
         self._lock_ui()
@@ -697,13 +881,14 @@ class FileScannerApp(ctk.CTkFrame):
         self.status_text.set("Creazione del report PDF in corso...")
         self.update_idletasks()
 
-        thread = threading.Thread(target=self._build_pdf_thread, args=(file_path, options, results_to_export), daemon=True)
+        thread = threading.Thread(target=self._build_pdf_thread, args=(file_path, options, pages_to_export), daemon=True)
         thread.start()
 
-    def _build_pdf_thread(self, file_path, options, results):
+    def _build_pdf_thread(self, file_path, options, pages_to_export):
         try:
-            grouped_results = defaultdict(list)
-            for item in results: grouped_results[item['scan_root']].append(item)
+            grouped_pages = defaultdict(list)
+            for page in pages_to_export:
+                grouped_pages[page['file_info']['scan_root']].append(page)
             
             page_size = landscape(A4) if options['orientation'] == 'landscape' else A4
             doc = SimpleDocTemplate(file_path, pagesize=page_size, topMargin=1.5*cm, bottomMargin=1.5*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
@@ -717,10 +902,11 @@ class FileScannerApp(ctk.CTkFrame):
             num_columns = options['columns']
             col_width = (doc.width / num_columns) - (cm * 0.2 * (num_columns - 1))
 
-            for folder, files in sorted(grouped_results.items()):
-                display_folder = self._get_display_path(files[0]).replace('\\', '/')
-                num_files, total_pages = len(files), sum(f.get('page_count', 1) for f in files)
-                total_sqm = sum(pd['width_cm'] * pd['height_cm'] for f in files for pd in f['pages_details']) / 10000
+            for folder, pages in sorted(grouped_pages.items()):
+                display_folder = self._get_display_path(pages[0]['file_info']).replace('\\', '/')
+                num_files = len(set(p['file_info']['filename'] for p in pages))
+                total_pages = len(pages)
+                total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
                 
                 stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
                 story.append(Paragraph(display_folder, folder_header_style))
@@ -728,34 +914,35 @@ class FileScannerApp(ctk.CTkFrame):
                 story.append(Spacer(1, 0.5*cm))
 
                 grid_data = []; row = []
-                for item_data in files:
+                for page_data in pages:
+                    item_data = page_data['file_info']
+                    page_num = page_data['page_num']
                     full_path = os.path.join(item_data['path'], item_data['filename'])
                     page_count = item_data.get('page_count', 1)
                     
-                    for page_num in range(page_count):
-                        cell_content = []
-                        try:
-                            if item_data['type'] in ('PDF', 'AI'):
-                                with fitz.open(full_path) as doc_pdf:
-                                    page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
-                                    img_data = pix.tobytes("png"); img_report = ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional')
-                            else:
-                                with Image.open(full_path) as img:
-                                    img.thumbnail((400, 400)); img_buffer = io.BytesIO()
-                                    img.save(img_buffer, format='PNG'); img_buffer.seek(0)
-                                    img_report = ReportLabImage(img_buffer, width=col_width*0.9, height=col_width*0.9, kind='proportional')
-                            cell_content.append(img_report)
-                        except Exception as e: print(f"Impossibile creare anteprima PDF per {full_path}: {e}")
-                        
-                        page_info = f" (Pag. {page_num + 1}/{page_count})" if page_count > 1 else ""
-                        cell_content.append(Paragraph(item_data['filename'] + page_info, filename_style))
-                        
-                        dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
-                        dims_text = item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}"
-                        cell_content.append(Paragraph(dims_text, dims_style))
-                        
-                        row.append(cell_content)
-                        if len(row) == num_columns: grid_data.append(row); row = []
+                    cell_content = []
+                    try:
+                        if item_data['type'] in ('PDF', 'AI'):
+                            with fitz.open(full_path) as doc_pdf:
+                                page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
+                                img_data = pix.tobytes("png"); img_report = ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional')
+                        else:
+                            with Image.open(full_path) as img:
+                                img.thumbnail((400, 400)); img_buffer = io.BytesIO()
+                                img.save(img_buffer, format='PNG'); img_buffer.seek(0)
+                                img_report = ReportLabImage(img_buffer, width=col_width*0.9, height=col_width*0.9, kind='proportional')
+                        cell_content.append(img_report)
+                    except Exception as e: print(f"Impossibile creare anteprima PDF per {full_path}: {e}")
+                    
+                    page_info = f" (Pag. {page_num + 1}/{page_count})" if page_count > 1 else ""
+                    cell_content.append(Paragraph(item_data['filename'] + page_info, filename_style))
+                    
+                    dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
+                    dims_text = item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}"
+                    cell_content.append(Paragraph(dims_text, dims_style))
+                    
+                    row.append(cell_content)
+                    if len(row) == num_columns: grid_data.append(row); row = []
                 if row:
                     row.extend([""] * (num_columns - len(row)))
                     grid_data.append(row)
@@ -776,14 +963,14 @@ class FileScannerApp(ctk.CTkFrame):
     def on_pdf_success(self, file_path):
         self.status_text.set("Report PDF creato con successo.")
         self._unlock_ui()
-        self.update() # Forza il ridisegno della finestra
+        self.update()
         messagebox.showinfo("Successo", f"Report esportato con successo in:\n{file_path}", parent=self)
 
     def on_pdf_error(self, e):
         traceback.print_exc()
         self.status_text.set("Errore durante la creazione del PDF.")
         self._unlock_ui()
-        self.update() # Forza il ridisegno della finestra
+        self.update()
         messagebox.showerror("Errore", f"Impossibile creare il PDF.\nErrore: {e}", parent=self)
 
 # --- Funzione di caricamento richiesta da winfile.py ---
