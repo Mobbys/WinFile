@@ -1,0 +1,3 @@
+GITHUB_TOKEN = "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" 
+Prima di compilare bisogna cambiare la versione sia in winfile.py che in setup.py mettendo la stessa
+Comando per compilare   python setup.py build
