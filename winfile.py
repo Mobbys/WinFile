@@ -16,14 +16,9 @@ from packaging import version
 
 # --- CONFIGURAZIONE AGGIORNAMENTI ---
 GITHUB_REPO = "Mobbys/WinFile" 
-CURRENT_VERSION = "2.5" # Questa deve corrispondere alla versione nel setup.py
+CURRENT_VERSION = "2.0" # Questa deve corrispondere alla versione nel setup.py
 
-# !! Per REPOSITORY PRIVATI: Incolla qui il tuo Personal Access Token (PAT) !!
-# 1. Vai su GitHub > Settings > Developer settings > Personal access tokens > Tokens (classic)
-# 2. Genera un nuovo token con solo il permesso 'repo'.
-# 3. Incollalo qui. Esempio: GITHUB_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
-# ATTENZIONE: Non condividere questo file con il token all'esterno del tuo team.
-GITHUB_TOKEN = "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" 
+# Il repository è pubblico, quindi non è necessario un token di accesso.
 
 # --- Finestra delle Impostazioni ---
 class SettingsWindow(ctk.CTkToplevel):
@@ -99,11 +94,9 @@ class WinFileApp(ctk.CTkFrame):
         """Contatta l'API di GitHub per verificare la presenza di una nuova release."""
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
-            headers = {}
-            if GITHUB_TOKEN:
-                headers["Authorization"] = f"token {GITHUB_TOKEN}"
-
-            response = requests.get(api_url, headers=headers, timeout=5)
+            
+            # Per i repository pubblici non è necessaria alcuna autenticazione
+            response = requests.get(api_url, timeout=5)
             response.raise_for_status()
             
             all_releases = response.json()
@@ -126,15 +119,26 @@ class WinFileApp(ctk.CTkFrame):
     def show_update_dialog(self, release_info):
         """Mostra la finestra di dialogo per informare l'utente dell'aggiornamento."""
         latest_version_tag = release_info['tag_name']
-        download_url = release_info['html_url'] # Fallback se non troviamo l'asset
+        assets = release_info.get('assets', [])
+        
+        # Impostazioni di fallback
+        download_url = release_info['html_url'] 
         message_action = "andare alla pagina di download"
 
-        # Cerca l'asset .zip per il download diretto
-        asset_url = next((asset['browser_download_url'] for asset in release_info.get('assets', []) if asset['name'].endswith('.zip')), None)
+        # *** NUOVA LOGICA DI CONTROLLO ***
+        # 1. Cerca prima l'asset .exe
+        exe_asset_url = next((asset['browser_download_url'] for asset in assets if asset['name'].endswith('.exe')), None)
         
-        if asset_url:
-            download_url = asset_url
-            message_action = "scaricare direttamente il file di aggiornamento"
+        # 2. Se non trova .exe, cerca l'asset .zip
+        zip_asset_url = next((asset['browser_download_url'] for asset in assets if asset['name'].endswith('.zip')), None)
+
+        if exe_asset_url:
+            download_url = exe_asset_url
+            message_action = "scaricare direttamente il nuovo installer (.exe)"
+        elif zip_asset_url:
+            download_url = zip_asset_url
+            message_action = "scaricare direttamente l'archivio di aggiornamento (.zip)"
+        # Altrimenti, usa il fallback già impostato
 
         message = (f"È disponibile una nuova versione: {latest_version_tag}!\n\n"
                    f"Vuoi {message_action}?")
@@ -204,7 +208,11 @@ if __name__ == "__main__":
     config = {
         "window": {"width": 1200, "height": 700, "min_width": 800, "min_height": 600},
         "theme": {"appearance_mode": "System", "color_theme": "blue"},
-        "apps": [{"module": "app_liste_anteprime"}, {"module": "app_controllo_immagini"}]
+        "apps": [
+            {"module": "app_liste_anteprime"}, 
+            {"module": "app_controllo_immagini"},
+            {"module": "app_controllo_pdf"} # <-- NUOVA APP AGGIUNTA QUI
+        ]
     }
     try:
         with open('config.json', 'r', encoding='utf-8') as f:

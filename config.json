@@ -11,6 +11,9 @@
         },
         {
             "module": "app_controllo_immagini"
+        },
+        {
+            "module": "app_controllo_pdf"
         }
     ],
     "theme": {
