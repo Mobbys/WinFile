@@ -17,7 +17,7 @@
         }
     ],
     "theme": {
-        "appearance_mode": "Dark",
+        "appearance_mode": "System",
         "color_theme": "blue"
     }
 }

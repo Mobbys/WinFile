@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v10.1 (Centering and Final Zoom)
+# apps/app_controllo_pdf.py - v12.9 (Versione Finale Stabile)
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -144,21 +144,26 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.pan_start_x = 0
         self.pan_start_y = 0
 
+        # --- Layout a 3 colonne ---
         self.grid_columnconfigure(0, weight=0, minsize=200)
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(1, weight=1, minsize=350)
+        self.grid_columnconfigure(2, weight=0, minsize=620) 
         self.grid_rowconfigure(0, weight=1)
 
+        # --- COLONNA 0: Miniature ---
         self.thumbnail_list_frame = ctk.CTkScrollableFrame(self, label_text="Pagine")
         self.thumbnail_list_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-        main_content_frame = ctk.CTkFrame(self, fg_color="transparent")
-        main_content_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
-        main_content_frame.grid_columnconfigure(0, weight=1)
-        main_content_frame.grid_rowconfigure(0, weight=0)
-        main_content_frame.grid_rowconfigure(1, weight=1)
+        # --- COLONNA 1: Dettagli e Azioni (Centrale) ---
+        center_frame = ctk.CTkFrame(self, fg_color="transparent")
+        center_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
+        center_frame.grid_columnconfigure(0, weight=1)
+        center_frame.grid_rowconfigure(0, weight=0) # Info
+        center_frame.grid_rowconfigure(1, weight=1) # Azioni + Spazio
+        center_frame.grid_rowconfigure(2, weight=0) # Controlli Zoom
 
-        top_info_frame = ctk.CTkFrame(main_content_frame)
-        top_info_frame.grid(row=0, column=0, sticky="ew")
+        top_info_frame = ctk.CTkFrame(center_frame)
+        top_info_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         top_info_frame.grid_columnconfigure(1, weight=1)
         
         self.info_vars = {}
@@ -167,54 +172,12 @@ class PDFCheckerApp(ctk.CTkFrame):
             label = ctk.CTkLabel(top_info_frame, text=label_text, anchor="e", font=ctk.CTkFont(weight="bold"))
             label.grid(row=i, column=0, padx=10, pady=2, sticky="ne")
             self.info_vars[label_text] = ctk.StringVar(value="-")
-            value_label = ctk.CTkLabel(top_info_frame, textvariable=self.info_vars[label_text], anchor="w", wraplength=600)
+            value_label = ctk.CTkLabel(top_info_frame, textvariable=self.info_vars[label_text], anchor="w", wraplength=400)
             value_label.grid(row=i, column=1, padx=10, pady=2, sticky="w")
 
-        bottom_content_frame = ctk.CTkFrame(main_content_frame, fg_color="transparent")
-        bottom_content_frame.grid(row=1, column=0, pady=(10, 0), sticky="nsew")
-        bottom_content_frame.grid_columnconfigure(0, weight=2, minsize=350)
-        bottom_content_frame.grid_columnconfigure(1, weight=4)
-        bottom_content_frame.grid_rowconfigure(0, weight=1)
-        bottom_content_frame.grid_rowconfigure(1, weight=0)
-
-        details_actions_frame = ctk.CTkFrame(bottom_content_frame)
-        details_actions_frame.grid(row=0, column=0, rowspan=2, padx=(0, 10), sticky="nsew")
-        details_actions_frame.grid_columnconfigure(0, weight=1)
+        details_actions_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        details_actions_frame.grid(row=1, column=0, sticky="new")
         
-        # --- MODIFICA: Usa grid per centrare l'immagine ---
-        self.preview_frame = ctk.CTkFrame(bottom_content_frame)
-        self.preview_frame.grid(row=0, column=1, sticky="nsew")
-        self.preview_frame.grid_rowconfigure(0, weight=1)
-        self.preview_frame.grid_columnconfigure(0, weight=1)
-
-        self.image_label = ctk.CTkLabel(self.preview_frame, text="", text_color="gray")
-        self.image_label.grid(row=0, column=0, sticky="nsew")
-        
-        if DND_SUPPORT:
-            self.drop_target = self
-            self.drop_target.drop_target_register(DND_FILES)
-            self.drop_target.dnd_bind('<<Drop>>', self.handle_drop)
-            self.image_label.configure(text="Trascina un file PDF qui")
-        else:
-            self.image_label.configure(text="Funzionalità di trascinamento disabilitata.")
-
-        self.image_label.bind("<ButtonPress-1>", self._on_pan_start)
-        self.image_label.bind("<B1-Motion>", self._on_pan_move)
-        self.image_label.bind("<ButtonRelease-1>", self._on_pan_end)
-        self.image_label.configure(cursor="hand2")
-
-        zoom_frame = ctk.CTkFrame(bottom_content_frame, fg_color="transparent")
-        zoom_frame.grid(row=1, column=1, pady=(5,0), sticky="ew")
-        zoom_frame.grid_columnconfigure((0, 2), weight=1)
-        zoom_frame.grid_columnconfigure(1, weight=0)
-
-        zoom_out_button = ctk.CTkButton(zoom_frame, text="-", width=40, command=self.zoom_out)
-        zoom_out_button.grid(row=0, column=0, sticky="e")
-        self.zoom_label = ctk.CTkLabel(zoom_frame, text="100%", width=60)
-        self.zoom_label.grid(row=0, column=1, padx=10)
-        zoom_in_button = ctk.CTkButton(zoom_frame, text="+", width=40, command=self.zoom_in)
-        zoom_in_button.grid(row=0, column=2, sticky="w")
-
         details_frame = ctk.CTkFrame(details_actions_frame)
         details_frame.pack(fill="x", expand=False, pady=10)
         details_frame.grid_columnconfigure(1, weight=1)
@@ -228,7 +191,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             value_label.grid(row=i, column=1, padx=10, pady=2, sticky="w")
 
         actions_frame = ctk.CTkFrame(details_actions_frame, fg_color="transparent")
-        actions_frame.pack(fill="both", expand=True, pady=10)
+        actions_frame.pack(fill="x", expand=False, pady=10)
         
         self.trim_button = ctk.CTkButton(actions_frame, text="Rifila Pagina Corrente", command=self.crop_to_trimbox, state="disabled")
         self.trim_button.pack(pady=5, fill="x")
@@ -241,6 +204,51 @@ class PDFCheckerApp(ctk.CTkFrame):
         
         self.save_button = ctk.CTkButton(actions_frame, text="Salva PDF Modificato...", command=self.save_modified_pdf, state="disabled", fg_color="green", hover_color="darkgreen")
         self.save_button.pack(pady=(15, 5), fill="x")
+        
+        zoom_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        zoom_frame.grid(row=2, column=0, sticky="sew", pady=(20,5))
+        zoom_frame.grid_columnconfigure(0, weight=1)
+
+        zoom_out_button = ctk.CTkButton(zoom_frame, text="-", width=40, command=self.zoom_out)
+        zoom_out_button.grid(row=0, column=1, padx=5)
+        self.zoom_label = ctk.CTkLabel(zoom_frame, text="100%", width=60)
+        self.zoom_label.grid(row=0, column=2, padx=5)
+        zoom_in_button = ctk.CTkButton(zoom_frame, text="+", width=40, command=self.zoom_in)
+        zoom_in_button.grid(row=0, column=3, padx=5)
+
+        # --- COLONNA 2: Anteprima (Destra) ---
+        right_frame = ctk.CTkFrame(self, fg_color="transparent")
+        right_frame.grid(row=0, column=2, padx=(0, 10), pady=10, sticky="nsew")
+        
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        self.preview_container = ctk.CTkFrame(right_frame, width=600, height=600)
+        self.preview_container.place(relx=0.5, rely=0.5, anchor="center")
+        self.preview_container.pack_propagate(False)
+
+        self.preview_frame = ctk.CTkScrollableFrame(self.preview_container, label_text="")
+        self.preview_frame.pack(fill="both", expand=True)
+        
+        # --- MODIFICA PAN: Configura la griglia interna del frame scorrevole ---
+        self.preview_frame.grid_columnconfigure(0, weight=1)
+        self.preview_frame.grid_rowconfigure(0, weight=1)
+
+        self.image_label = ctk.CTkLabel(self.preview_frame, text="", text_color="gray")
+        self.image_label.grid(row=0, column=0)
+        
+        if DND_SUPPORT:
+            self.drop_target = self
+            self.drop_target.drop_target_register(DND_FILES)
+            self.drop_target.dnd_bind('<<Drop>>', self.handle_drop)
+            self.image_label.configure(text="Trascina un file PDF qui")
+        else:
+            self.image_label.configure(text="Funzionalità di trascinamento disabilitata.")
+
+        self.image_label.bind("<ButtonPress-1>", self._on_pan_start)
+        self.image_label.bind("<B1-Motion>", self._on_pan_move)
+        self.image_label.bind("<ButtonRelease-1>", self._on_pan_end)
+        self.image_label.configure(cursor="hand2")
 
     def _on_pan_start(self, event):
         self.image_label.configure(cursor="fleur")
@@ -365,7 +373,8 @@ class PDFCheckerApp(ctk.CTkFrame):
             self.info_vars["MediaBox (cm):"].set(f"{(media_box.width / 72) * 2.54:.2f} x {(media_box.height / 72) * 2.54:.2f} cm")
             self.info_vars["TrimBox (cm):"].set(f"{(trim_box.width / 72) * 2.54:.2f} x {(trim_box.height / 72) * 2.54:.2f} cm" if trim_box and trim_box.is_valid else "- (non definito)")
 
-            self._fit_and_update(page)
+            self._fit_zoom_to_view(page)
+            self._update_preview_image()
             
             self.trim_button.configure(state="normal" if page.trimbox != page.mediabox and page.trimbox.is_valid else "disabled")
             self.trim_all_button.configure(state="normal")
@@ -374,17 +383,19 @@ class PDFCheckerApp(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Errore Visualizzazione", f"Impossibile mostrare dettagli pagina.\n\nDettagli: {e}", parent=self)
 
-    def _fit_and_update(self, page):
-        self._fit_zoom_to_view(page)
-        self._update_preview_image()
-
     def _fit_zoom_to_view(self, page):
         try:
-            preview_width = 620 - 20
-            preview_height = 576 - 20
+            preview_width = 600
+            preview_height = 600
+            
+            preview_width -= 20
+            preview_height -= 20
 
             page_width = page.rect.width
             page_height = page.rect.height
+
+            if page.rotation in [90, 270]:
+                page_width, page_height = page_height, page_width
 
             if page_width == 0 or page_height == 0:
                 return
@@ -394,7 +405,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             
             self.zoom_level = min(zoom_x, zoom_y)
 
-        except Exception:
+        except Exception as e:
             self.zoom_level = 1.0
 
     def zoom_in(self):
@@ -415,14 +426,14 @@ class PDFCheckerApp(ctk.CTkFrame):
         
         try:
             matrix = fitz.Matrix(self.zoom_level, self.zoom_level)
-            pix = page.get_pixmap(matrix=matrix)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
             self.ctk_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.image_label.configure(image=self.ctk_image, text="")
             self.zoom_label.configure(text=f"{self.zoom_level*100:.0f}%")
+
         except Exception as e:
-            print(f"Errore durante l'aggiornamento dell'anteprima: {e}")
             self.image_label.configure(image=None, text="Errore anteprima")
 
     def _ensure_modifiable_doc(self):
