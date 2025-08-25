@@ -3,3 +3,4 @@
 /apps/__pycache__
 /apps/__pycache__
 apps/__pycache__/app_controllo_immagini.cpython-313.pyc
+*.pyc
