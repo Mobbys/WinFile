@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v8.1 (Ritaglio Multi-pagina)
+# apps/app_controllo_pdf.py - v8.3 (Fix Drag&Drop parsing)
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -6,6 +6,7 @@ from tkinter import messagebox, filedialog
 import io
 from PIL import Image
 import traceback
+import re
 
 # Prova a importare la libreria per il Drag & Drop
 try:
@@ -149,19 +150,27 @@ class PDFCheckerApp(ctk.CTkFrame):
 
     def handle_drop(self, event):
         try:
-            path_string = event.data.strip()
-            if path_string.startswith('{') and path_string.endswith('}'):
-                path_string = path_string[1:-1]
-
-            possible_paths = self.tk.splitlist(path_string)
+            # --- MODIFICA INIZIO ---
+            # Usa una regex per trovare correttamente i percorsi dei file,
+            # gestendo sia i percorsi con spazi (racchiusi tra {}) sia quelli senza.
+            # Questo risolve il problema di un singolo file con spazi nel nome
+            # che veniva erroneamente interpretato come file multipli.
+            paths = re.findall(r'\{.*?\}|\S+', event.data)
             
-            file_path = ""
-            if possible_paths and os.path.exists(possible_paths[0]):
-                file_path = possible_paths[0]
-            elif os.path.exists(path_string):
-                file_path = path_string
-            else:
-                messagebox.showerror("Errore nel percorso", f"Impossibile trovare il file:\n{event.data}", parent=self)
+            # Pulisce i percorsi dalle parentesi graffe
+            cleaned_paths = [p.strip('{}') for p in paths]
+
+            # Controlla se è stato trascinato più di un file
+            if len(cleaned_paths) > 1:
+                messagebox.showwarning("File Multipli", "È possibile trascinare un solo file alla volta.", parent=self)
+                return
+            
+            file_path = cleaned_paths[0]
+            # --- MODIFICA FINE ---
+
+            # Verifica l'esistenza del percorso
+            if not os.path.exists(file_path):
+                messagebox.showerror("Errore nel percorso", f"Impossibile trovare il file:\n{file_path}", parent=self)
                 return
 
             if file_path.lower().endswith('.pdf'):
