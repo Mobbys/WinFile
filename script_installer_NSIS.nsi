@@ -25,7 +25,7 @@
 ; --- Proprietà Principali dell'Installer ---
 Name "${NOME_PRODOTTO} ${VERSIONE}"
 OutFile "${NOME_SETUP}"
-InstallDir "$DESKTOP\${NOME_PRODOTTO}" ; Installa in una nuova cartella sul Desktop dell'utente
+InstallDir "$APPDATA\${NOME_PRODOTTO}" ; Installa in una nuova cartella sul Desktop dell'utente
 RequestExecutionLevel user ; Non richiede permessi di amministratore, perfetto per il Desktop
 
 ; ##################################################################

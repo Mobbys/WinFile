@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v8.0 (Solo Ritaglio)
+# apps/app_controllo_pdf.py - v8.1 (Ritaglio Multi-pagina)
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -122,8 +122,12 @@ class PDFCheckerApp(ctk.CTkFrame):
         actions_frame = ctk.CTkFrame(details_actions_frame, fg_color="transparent")
         actions_frame.pack(fill="both", expand=True, pady=10)
         
-        self.trim_button = ctk.CTkButton(actions_frame, text="Rifila a TrimBox", command=self.crop_to_trimbox, state="disabled")
+        self.trim_button = ctk.CTkButton(actions_frame, text="Rifila Pagina Corrente", command=self.crop_to_trimbox, state="disabled")
         self.trim_button.pack(pady=5)
+        
+        self.trim_all_button = ctk.CTkButton(actions_frame, text="Rifila Tutte le Pagine", command=self.crop_all_pages_to_trimbox, state="disabled")
+        self.trim_all_button.pack(pady=5)
+
         self.save_button = ctk.CTkButton(actions_frame, text="Salva PDF Modificato...", command=self.save_modified_pdf, state="disabled")
         self.save_button.pack(pady=5)
 
@@ -172,11 +176,13 @@ class PDFCheckerApp(ctk.CTkFrame):
         try:
             self.doc = fitz.open(file_path)
             self.doc_path = file_path
-            self.modified_doc = None
+            self.modified_doc = None # Resetta le modifiche al caricamento di un nuovo file
             self.save_button.configure(state="disabled")
             self.info_vars["Nome file:"].set(os.path.basename(file_path))
             self.info_vars["Percorso:"].set(os.path.dirname(file_path))
             self._populate_thumbnail_list()
+            # Abilita il pulsante per ritagliare tutte le pagine
+            self.trim_all_button.configure(state="normal" if self.doc and len(self.doc) > 0 else "disabled")
         except Exception as e:
             messagebox.showerror("Errore Apertura PDF", f"Impossibile aprire il file PDF.\n\nDettagli: {e}\n\nTraceback:\n{traceback.format_exc()}", parent=self)
             self._clear_all()
@@ -184,6 +190,7 @@ class PDFCheckerApp(ctk.CTkFrame):
     def _populate_thumbnail_list(self):
         for widget in self.thumbnail_list_frame.winfo_children(): widget.destroy()
         self.page_thumbnail_buttons.clear()
+        # Usa il documento modificato se esiste, altrimenti l'originale
         current_doc = self.modified_doc if self.modified_doc else self.doc
         if not current_doc: return
         for page_num in range(len(current_doc)):
@@ -249,23 +256,51 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.image_label.configure(image=self.ctk_image, text="")
         self.zoom_label.configure(text=f"{self.zoom_level*100:.0f}%")
 
+    def _ensure_modifiable_doc(self):
+        """Crea una copia modificabile del documento se non esiste già."""
+        if self.modified_doc is None and self.doc_path:
+            self.modified_doc = fitz.open(self.doc_path)
+
     def crop_to_trimbox(self):
         if self.active_page_index == -1: return
         try:
-            current_doc_to_modify = fitz.open(self.doc_path)
-            page = current_doc_to_modify[self.active_page_index]
+            self._ensure_modifiable_doc()
+            page = self.modified_doc[self.active_page_index]
             if page.trimbox and page.trimbox.is_valid and page.trimbox != page.mediabox:
                 page.set_cropbox(page.trimbox)
-                self.modified_doc = fitz.open("pdf", current_doc_to_modify.write())
                 self._populate_thumbnail_list() 
                 self._display_page_details(self.active_page_index)
                 self.save_button.configure(state="normal")
-                messagebox.showinfo("Rifilatura Applicata", "Salva il PDF per rendere le modifiche permanenti.", parent=self)
+                messagebox.showinfo("Rifilatura Applicata", "La pagina è stata rifilata.\nSalva il PDF per rendere le modifiche permanenti.", parent=self)
             else:
                 messagebox.showinfo("Nessuna Azione", "TrimBox coincide già con MediaBox o non è valido.", parent=self)
-            current_doc_to_modify.close()
         except Exception as e:
             messagebox.showerror("Errore Rifilatura", f"Impossibile applicare TrimBox.\n\nDettagli: {e}", parent=self)
+
+    def crop_all_pages_to_trimbox(self):
+        if not self.doc: return
+        try:
+            self._ensure_modifiable_doc()
+            modified_pages_count = 0
+
+            for page in self.modified_doc:
+                if page.trimbox and page.trimbox.is_valid and page.trimbox != page.mediabox:
+                    page.set_cropbox(page.trimbox)
+                    modified_pages_count += 1
+
+            if modified_pages_count > 0:
+                self._populate_thumbnail_list()
+                self._display_page_details(self.active_page_index if self.active_page_index != -1 else 0)
+                self.save_button.configure(state="normal")
+                messagebox.showinfo("Rifilatura Completata",
+                                    f"{modified_pages_count} pagine sono state rifilate.\n"
+                                    "Salva il PDF per rendere le modifiche permanenti.", parent=self)
+            else:
+                messagebox.showinfo("Nessuna Azione",
+                                    "Nessuna pagina richiedeva la rifilatura.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Errore Rifilatura Globale", f"Impossibile applicare TrimBox a tutte le pagine.\n\nDettagli: {e}", parent=self)
+
 
     def save_modified_pdf(self):
         if not self.modified_doc: return
@@ -290,6 +325,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             if key in self.info_vars: self.info_vars[key].set("-")
         self.image_label.configure(image=None, text="Trascina un file PDF qui")
         self.trim_button.configure(state="disabled")
+        self.trim_all_button.configure(state="disabled")
         self.save_button.configure(state="disabled")
 
 def create_tab(tab_view):
