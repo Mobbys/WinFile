@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v12.9 (Versione Finale Stabile)
+# apps/app_controllo_pdf.py - v13.1
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -22,12 +22,12 @@ class PageSelectionDialog(ctk.CTkToplevel):
     Una finestra di dialogo per selezionare pagine specifiche da un documento PDF,
     mostrando le miniature.
     """
-    def __init__(self, master, doc_to_add):
+    def __init__(self, master, doc, title="Seleziona Pagine", button_text="Aggiungi"):
         super().__init__(master)
-        self.doc_to_add = doc_to_add
+        self.doc = doc
         self.selected_pages = []
 
-        self.title("Seleziona Pagine da Aggiungere")
+        self.title(title)
         self.geometry("500x600")
         self.transient(master)
         self.grab_set()
@@ -35,13 +35,13 @@ class PageSelectionDialog(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        scroll_frame = ctk.CTkScrollableFrame(self, label_text=f"Pagine in '{os.path.basename(doc_to_add.name)}'")
+        scroll_frame = ctk.CTkScrollableFrame(self, label_text=f"Pagine in '{os.path.basename(self.doc.name)}'")
         scroll_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
         self.checkbox_vars = []
         self.thumbnail_images = []
 
-        for i, page in enumerate(self.doc_to_add):
+        for i, page in enumerate(self.doc):
             row_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
             row_frame.pack(fill="x", padx=5, pady=5)
             row_frame.grid_columnconfigure(1, weight=1)
@@ -67,8 +67,8 @@ class PageSelectionDialog(ctk.CTkToplevel):
         deselect_all_btn = ctk.CTkButton(button_frame, text="Deseleziona Tutti", command=self.deselect_all)
         deselect_all_btn.grid(row=0, column=1, padx=5)
 
-        add_btn = ctk.CTkButton(button_frame, text="Aggiungi", command=self.confirm_selection, fg_color="green", hover_color="darkgreen")
-        add_btn.grid(row=0, column=2, padx=5)
+        confirm_btn = ctk.CTkButton(button_frame, text=button_text, command=self.confirm_selection, fg_color="green", hover_color="darkgreen")
+        confirm_btn.grid(row=0, column=2, padx=5)
 
         cancel_btn = ctk.CTkButton(button_frame, text="Annulla", command=self.destroy, fg_color="gray", hover_color="darkgray")
         cancel_btn.grid(row=0, column=3, padx=5)
@@ -202,6 +202,9 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.add_pages_button = ctk.CTkButton(actions_frame, text="Aggiungi Pagine da PDF...", command=self.add_pages, state="disabled")
         self.add_pages_button.pack(pady=5, fill="x")
         
+        self.extract_pages_button = ctk.CTkButton(actions_frame, text="Estrai Pagine Singole...", command=self.extract_pages, state="disabled")
+        self.extract_pages_button.pack(pady=5, fill="x")
+        
         self.save_button = ctk.CTkButton(actions_frame, text="Salva PDF Modificato...", command=self.save_modified_pdf, state="disabled", fg_color="green", hover_color="darkgreen")
         self.save_button.pack(pady=(15, 5), fill="x")
         
@@ -230,7 +233,6 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.preview_frame = ctk.CTkScrollableFrame(self.preview_container, label_text="")
         self.preview_frame.pack(fill="both", expand=True)
         
-        # --- MODIFICA PAN: Configura la griglia interna del frame scorrevole ---
         self.preview_frame.grid_columnconfigure(0, weight=1)
         self.preview_frame.grid_rowconfigure(0, weight=1)
 
@@ -379,6 +381,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             self.trim_button.configure(state="normal" if page.trimbox != page.mediabox and page.trimbox.is_valid else "disabled")
             self.trim_all_button.configure(state="normal")
             self.add_pages_button.configure(state="normal")
+            self.extract_pages_button.configure(state="normal")
 
         except Exception as e:
             messagebox.showerror("Errore Visualizzazione", f"Impossibile mostrare dettagli pagina.\n\nDettagli: {e}", parent=self)
@@ -461,7 +464,7 @@ class PDFCheckerApp(ctk.CTkFrame):
                 if len(doc_to_add) == 1:
                     selected_pages = [0]
                 else:
-                    dialog = PageSelectionDialog(self, doc_to_add)
+                    dialog = PageSelectionDialog(self, doc_to_add, title="Seleziona Pagine da Aggiungere", button_text="Aggiungi")
                     self.wait_window(dialog)
                     selected_pages = dialog.selected_pages
                 
@@ -528,6 +531,46 @@ class PDFCheckerApp(ctk.CTkFrame):
             except Exception as e:
                 messagebox.showerror("Errore di Salvataggio", f"Impossibile salvare il file.\n\nDettagli: {e}", parent=self)
 
+    def extract_pages(self):
+        """
+        Apre un dialogo per selezionare le pagine, poi le estrae come file PDF singoli.
+        """
+        current_doc = self.modified_doc if self.modified_doc else self.doc
+        if not current_doc:
+            return
+
+        dialog = PageSelectionDialog(self, current_doc, title="Seleziona Pagine da Estrarre", button_text="Estrai")
+        self.wait_window(dialog)
+        selected_pages = dialog.selected_pages
+
+        if not selected_pages:
+            return
+
+        save_folder = filedialog.askdirectory(parent=self, title="Seleziona la cartella dove salvare le pagine estratte")
+        
+        if not save_folder:
+            return
+
+        try:
+            base_filename = os.path.splitext(os.path.basename(self.doc_path))[0]
+            num_pages_total = len(current_doc)
+            
+            for i in selected_pages:
+                new_doc = fitz.open()
+                new_doc.insert_pdf(current_doc, from_page=i, to_page=i)
+                
+                page_num_str = str(i + 1).zfill(len(str(num_pages_total)))
+                output_path = os.path.join(save_folder, f"{base_filename}_pagina_{page_num_str}.pdf")
+                
+                new_doc.save(output_path, garbage=4, deflate=True)
+                new_doc.close()
+
+            messagebox.showinfo("Estrazione Completata", f"{len(selected_pages)} pagine sono state estratte con successo nella cartella:\n{save_folder}", parent=self)
+
+        except Exception as e:
+            messagebox.showerror("Errore Estrazione", f"Si è verificato un errore durante l'estrazione delle pagine.\n\nDettagli: {e}", parent=self)
+
+
     def _clear_all(self):
         if self.doc: self.doc.close()
         if self.modified_doc: self.modified_doc.close()
@@ -544,6 +587,7 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.trim_button.configure(state="disabled")
         self.trim_all_button.configure(state="disabled")
         self.add_pages_button.configure(state="disabled")
+        self.extract_pages_button.configure(state="disabled")
         self.save_button.configure(state="disabled")
 
 def create_tab(tab_view):

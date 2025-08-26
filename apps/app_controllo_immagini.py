@@ -1,7 +1,7 @@
-# app_controllo_immagini.py - v8.6
+# app_controllo_immagini.py - v9.0
 import customtkinter as ctk
 import os
-from tkinter import filedialog, Canvas
+from tkinter import filedialog, Canvas, Toplevel
 from PIL import Image, ExifTags, ImageOps, ImageTk
 import math
 
@@ -19,9 +19,9 @@ class ImageCheckerApp(ctk.CTkFrame):
         self.loaded_images = []
         self.thumbnail_buttons = []
         self.active_image_index = -1
-        self.original_image_obj = None # Mantiene l'immagine originale per il reset
-        self.modified_image_obj = None # Immagine su cui si lavora
-        self.photo_image = None # Per riferimento su Canvas
+        self.original_image_obj = None 
+        self.modified_image_obj = None 
+        self.photo_image = None 
         self.image_width_px = None
         self.image_height_px = None
         self._is_updating_dimensions = False
@@ -36,6 +36,13 @@ class ImageCheckerApp(ctk.CTkFrame):
         self.image_on_canvas_id = None
         self.canvas_scale_factor = 1.0
         self.canvas_offset = (0, 0)
+
+        # --- NUOVO: Variabili per la Lente d'Ingrandimento ---
+        self.magnifier_window = None
+        self.magnifier_canvas = None
+        self.magnifier_photo = None
+        self.magnifier_size = 100  # Dimensione della lente in pixel
+        self.magnifier_zoom = 5    # Fattore di ingrandimento
 
         # --- Layout Principale ---
         self.grid_columnconfigure(0, weight=0, minsize=180)
@@ -151,12 +158,10 @@ class ImageCheckerApp(ctk.CTkFrame):
         transform_frame.grid(row=1, column=0, sticky="new", pady=(10, 0))
         transform_frame.grid_columnconfigure(0, weight=1)
 
-        # Frame per i pulsanti di trasformazione su una riga
         transform_buttons_frame = ctk.CTkFrame(transform_frame, fg_color="transparent")
         transform_buttons_frame.grid(row=1, column=0, sticky="ew")
         transform_buttons_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
-        # Pulsanti Rotazione e Flip
         rotate_left_btn = ctk.CTkButton(transform_buttons_frame, text="↶", command=lambda: self._rotate_image(90), width=40)
         rotate_left_btn.grid(row=0, column=0, padx=(5,2), pady=5, sticky="ew")
         
@@ -201,9 +206,10 @@ class ImageCheckerApp(ctk.CTkFrame):
         reset_crop_btn = ctk.CTkButton(crop_buttons_frame, text="Reset Ritaglio", command=self._reset_crop_to_full_image, fg_color="gray50", hover_color="gray30")
         reset_crop_btn.grid(row=0, column=1, padx=(2,5), pady=5, sticky="ew")
 
-        # Pulsante Salva
         save_btn = ctk.CTkButton(transform_frame, text="Salva con nome...", command=self._save_image_as, fg_color="#28a745", hover_color="#218838")
         save_btn.grid(row=4, column=0, columnspan=2, padx=5, pady=(10, 5), sticky="ew")
+
+        self._create_magnifier()
 
 
     def handle_drop(self, event):
@@ -432,7 +438,60 @@ class ImageCheckerApp(ctk.CTkFrame):
                 print(f"Immagine salvata con successo in: {file_path}")
             except Exception as e: print(f"Errore durante il salvataggio dell'immagine: {e}")
 
-    # --- Funzioni per il Ritaglio Interattivo ---
+    # --- Funzioni per il Ritaglio Interattivo e Lente ---
+
+    def _create_magnifier(self):
+        self.magnifier_window = Toplevel(self)
+        self.magnifier_window.overrideredirect(True)
+        self.magnifier_window.wm_attributes("-topmost", True)
+        self.magnifier_canvas = Canvas(self.magnifier_window, width=self.magnifier_size, height=self.magnifier_size, highlightthickness=0)
+        self.magnifier_canvas.pack()
+        self.magnifier_window.withdraw()
+
+    def _show_magnifier(self, event):
+        if self.magnifier_window:
+            self.magnifier_window.deiconify()
+            self._update_magnifier(event)
+
+    def _hide_magnifier(self):
+        if self.magnifier_window:
+            self.magnifier_window.withdraw()
+
+    def _update_magnifier(self, event):
+        if not self.modified_image_obj:
+            self._hide_magnifier()
+            return
+
+        # Posiziona la lente vicino al cursore
+        self.magnifier_window.geometry(f"+{event.x_root + 20}+{event.y_root + 20}")
+
+        # Converte le coordinate del canvas in coordinate dell'immagine originale
+        img_x = int((event.x - self.canvas_offset[0]) / self.canvas_scale_factor)
+        img_y = int((event.y - self.canvas_offset[1]) / self.canvas_scale_factor)
+
+        # Ritaglia una piccola area dall'immagine originale
+        box_size = int(self.magnifier_size / self.magnifier_zoom)
+        box = (
+            img_x - box_size // 2,
+            img_y - box_size // 2,
+            img_x + box_size // 2,
+            img_y + box_size // 2,
+        )
+        
+        try:
+            region = self.modified_image_obj.crop(box)
+            # Ingrandisce la regione
+            zoomed_region = region.resize((self.magnifier_size, self.magnifier_size), Image.Resampling.NEAREST)
+            self.magnifier_photo = ImageTk.PhotoImage(zoomed_region)
+            self.magnifier_canvas.create_image(0, 0, anchor="nw", image=self.magnifier_photo)
+            
+            # Disegna il mirino
+            center = self.magnifier_size / 2
+            self.magnifier_canvas.create_line(center, 0, center, self.magnifier_size, fill="red")
+            self.magnifier_canvas.create_line(0, center, self.magnifier_size, center, fill="red")
+        except Exception:
+            # Se il cursore è fuori dall'immagine, non fare nulla
+            pass
 
     def _reset_crop(self):
         self.preview_canvas.delete(self.crop_rect_id)
@@ -552,6 +611,7 @@ class ImageCheckerApp(ctk.CTkFrame):
             if "handle" in tags:
                 self.drag_mode = "resize"
                 self.active_handle = tags[0].split('_')[1]
+                self._show_magnifier(event)
                 return
             elif "crop_rect" in tags:
                 self.drag_mode = "move"
@@ -564,6 +624,9 @@ class ImageCheckerApp(ctk.CTkFrame):
 
     def _on_canvas_drag(self, event):
         if not self.drag_mode: return
+        
+        if self.drag_mode == "resize":
+            self._update_magnifier(event)
         
         dx = event.x - self.drag_start_pos[0]
         dy = event.y - self.drag_start_pos[1]
@@ -588,6 +651,7 @@ class ImageCheckerApp(ctk.CTkFrame):
         self._update_crop_display()
 
     def _on_canvas_release(self, event):
+        self._hide_magnifier()
         c = self.crop_rect_coords
         if c and c['x1'] > c['x2']: c['x1'], c['x2'] = c['x2'], c['x1']
         if c and c['y1'] > c['y2']: c['y1'], c['y2'] = c['y2'], c['y1']
