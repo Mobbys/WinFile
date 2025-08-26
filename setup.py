@@ -3,7 +3,7 @@ from cx_Freeze import setup, Executable
 
 # --- Dati dell'applicazione (modifica qui per versioni future) ---
 APP_NAME = "WinFile"
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 # --- Opzioni di Base ---
 packages = ["customtkinter", "tkinterdnd2", "PIL", "fitz", "reportlab", "requests", "packaging"]
