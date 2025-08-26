@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v14.2
+# apps/app_controllo_pdf.py - v14.3
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -97,18 +97,31 @@ class AddMarginsDialog(ctk.CTkToplevel):
         super().__init__(master)
         self.result = None
         self.title("Aggiungi Margini")
-        self.geometry("400x250")
+        self.geometry("400x300")
         self.transient(master)
         self.grab_set()
 
         self.grid_columnconfigure(1, weight=1)
 
         # Margini
-        margin_label = ctk.CTkLabel(self, text="Aggiungi Margini (mm):")
-        margin_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.margin_var = ctk.StringVar(value="10")
-        self.margin_entry = ctk.CTkEntry(self, textvariable=self.margin_var)
-        self.margin_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        margins_frame = ctk.CTkFrame(self, fg_color="transparent")
+        margins_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        margins_frame.grid_columnconfigure((1, 3), weight=1)
+
+        self.margin_top_var = ctk.StringVar(value="10")
+        self.margin_bottom_var = ctk.StringVar(value="10")
+        self.margin_left_var = ctk.StringVar(value="10")
+        self.margin_right_var = ctk.StringVar(value="10")
+
+        ctk.CTkLabel(margins_frame, text="Sopra (mm):").grid(row=0, column=0, padx=(0,5), pady=5, sticky="w")
+        ctk.CTkEntry(margins_frame, textvariable=self.margin_top_var).grid(row=0, column=1, sticky="ew")
+        ctk.CTkLabel(margins_frame, text="Sotto (mm):").grid(row=1, column=0, padx=(0,5), pady=5, sticky="w")
+        ctk.CTkEntry(margins_frame, textvariable=self.margin_bottom_var).grid(row=1, column=1, sticky="ew")
+        ctk.CTkLabel(margins_frame, text="Sinistra (mm):").grid(row=0, column=2, padx=(10,5), pady=5, sticky="w")
+        ctk.CTkEntry(margins_frame, textvariable=self.margin_left_var).grid(row=0, column=3, sticky="ew")
+        ctk.CTkLabel(margins_frame, text="Destra (mm):").grid(row=1, column=2, padx=(10,5), pady=5, sticky="w")
+        ctk.CTkEntry(margins_frame, textvariable=self.margin_right_var).grid(row=1, column=3, sticky="ew")
+
 
         # Colore
         color_label = ctk.CTkLabel(self, text="Colore Margini:")
@@ -154,9 +167,11 @@ class AddMarginsDialog(ctk.CTkToplevel):
 
     def apply(self):
         try:
-            margin = float(self.margin_var.get())
             self.result = {
-                "margin_mm": margin,
+                "margin_top": float(self.margin_top_var.get()),
+                "margin_bottom": float(self.margin_bottom_var.get()),
+                "margin_left": float(self.margin_left_var.get()),
+                "margin_right": float(self.margin_right_var.get()),
                 "color_hex": self.color_hex,
                 "scope": self.scope_var.get()
             }
@@ -683,7 +698,11 @@ class PDFCheckerApp(ctk.CTkFrame):
         try:
             self._ensure_modifiable_doc()
             
-            margin_points = settings["margin_mm"] * 2.83465 # Convert mm to points
+            margin_top_points = settings["margin_top"] * 2.83465
+            margin_bottom_points = settings["margin_bottom"] * 2.83465
+            margin_left_points = settings["margin_left"] * 2.83465
+            margin_right_points = settings["margin_right"] * 2.83465
+
             hex_color = settings["color_hex"].lstrip('#')
             rgb_color = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
@@ -695,10 +714,10 @@ class PDFCheckerApp(ctk.CTkFrame):
                 original_rect = page.rect
                 
                 new_rect = fitz.Rect(
-                    original_rect.x0 - margin_points,
-                    original_rect.y0 - margin_points,
-                    original_rect.x1 + margin_points,
-                    original_rect.y1 + margin_points
+                    original_rect.x0 - margin_left_points,
+                    original_rect.y0 - margin_top_points,
+                    original_rect.x1 + margin_right_points,
+                    original_rect.y1 + margin_bottom_points
                 )
                 
                 # Crea un documento temporaneo con la nuova pagina
@@ -709,7 +728,7 @@ class PDFCheckerApp(ctk.CTkFrame):
                 new_page.draw_rect(new_page.rect, color=rgb_color, fill=rgb_color)
                 
                 # Inserisce il contenuto della vecchia pagina al centro della nuova
-                target_rect = fitz.Rect(margin_points, margin_points, new_rect.width - margin_points, new_rect.height - margin_points)
+                target_rect = fitz.Rect(margin_left_points, margin_top_points, new_rect.width - margin_right_points, new_rect.height - margin_bottom_points)
                 new_page.show_pdf_page(target_rect, self.modified_doc, i)
                 
                 # Sostituisce la pagina
