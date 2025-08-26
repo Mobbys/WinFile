@@ -119,6 +119,7 @@ class WinFileApp(ctk.CTkFrame):
     def show_update_dialog(self, release_info):
         """Mostra la finestra di dialogo per informare l'utente dell'aggiornamento."""
         latest_version_tag = release_info['tag_name']
+        release_notes = release_info.get('body', 'Nessuna nota di rilascio disponibile.')
         assets = release_info.get('assets', [])
         
         # Impostazioni di fallback
@@ -141,6 +142,7 @@ class WinFileApp(ctk.CTkFrame):
         # Altrimenti, usa il fallback già impostato
 
         message = (f"È disponibile una nuova versione: {latest_version_tag}!\n\n"
+                   f"Note di Rilascio:\n\n{release_notes}\n\n"
                    f"Vuoi {message_action}?")
         
         if messagebox.askyesno("Aggiornamento Disponibile", message, parent=self):
