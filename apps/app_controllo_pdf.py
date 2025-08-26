@@ -1,8 +1,8 @@
-# apps/app_controllo_pdf.py - v13.1
+# apps/app_controllo_pdf.py - v14.2
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, colorchooser
 from PIL import Image
 import traceback
 import re
@@ -90,6 +90,80 @@ class PageSelectionDialog(ctk.CTkToplevel):
     def confirm_selection(self):
         self.selected_pages = [i for i, var in enumerate(self.checkbox_vars) if var.get() == "on"]
         self.destroy()
+
+class AddMarginsDialog(ctk.CTkToplevel):
+    """Dialogo per aggiungere margini a una o più pagine."""
+    def __init__(self, master):
+        super().__init__(master)
+        self.result = None
+        self.title("Aggiungi Margini")
+        self.geometry("400x250")
+        self.transient(master)
+        self.grab_set()
+
+        self.grid_columnconfigure(1, weight=1)
+
+        # Margini
+        margin_label = ctk.CTkLabel(self, text="Aggiungi Margini (mm):")
+        margin_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        self.margin_var = ctk.StringVar(value="10")
+        self.margin_entry = ctk.CTkEntry(self, textvariable=self.margin_var)
+        self.margin_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+
+        # Colore
+        color_label = ctk.CTkLabel(self, text="Colore Margini:")
+        color_label.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        self.color_hex = "#FFFFFF"
+        self.color_button = ctk.CTkButton(self, text="Seleziona Colore", command=self.choose_color)
+        self.color_button.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        self.color_button.configure(fg_color=self.color_hex, text_color=self._get_contrasting_text_color(self.color_hex))
+
+        # Ambito di applicazione
+        scope_label = ctk.CTkLabel(self, text="Applica a:")
+        scope_label.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        self.scope_var = ctk.StringVar(value="current")
+        
+        radio_frame = ctk.CTkFrame(self, fg_color="transparent")
+        radio_frame.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        
+        ctk.CTkRadioButton(radio_frame, text="Pagina Corrente", variable=self.scope_var, value="current").pack(anchor="w")
+        ctk.CTkRadioButton(radio_frame, text="Tutte le Pagine", variable=self.scope_var, value="all").pack(anchor="w")
+        ctk.CTkRadioButton(radio_frame, text="Pagine Selezionate", variable=self.scope_var, value="selected").pack(anchor="w")
+
+        # Pulsanti di conferma
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.grid(row=3, column=0, columnspan=2, pady=20)
+        
+        apply_btn = ctk.CTkButton(button_frame, text="Applica", command=self.apply, fg_color="green")
+        apply_btn.pack(side="left", padx=10)
+        
+        cancel_btn = ctk.CTkButton(button_frame, text="Annulla", command=self.destroy, fg_color="gray")
+        cancel_btn.pack(side="left", padx=10)
+
+    def choose_color(self):
+        color_code = colorchooser.askcolor(title="Scegli un colore", parent=self)
+        if color_code and color_code[1]:
+            self.color_hex = color_code[1]
+            self.color_button.configure(fg_color=self.color_hex, text_color=self._get_contrasting_text_color(self.color_hex))
+
+    def _get_contrasting_text_color(self, hex_color):
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        return "black" if brightness > 125 else "white"
+
+    def apply(self):
+        try:
+            margin = float(self.margin_var.get())
+            self.result = {
+                "margin_mm": margin,
+                "color_hex": self.color_hex,
+                "scope": self.scope_var.get()
+            }
+            self.destroy()
+        except ValueError:
+            messagebox.showerror("Valore non valido", "Inserisci un valore numerico per i margini.", parent=self)
+
 
 class DragDropChoiceDialog(ctk.CTkToplevel):
     """
@@ -204,6 +278,9 @@ class PDFCheckerApp(ctk.CTkFrame):
         
         self.extract_pages_button = ctk.CTkButton(actions_frame, text="Estrai Pagine Singole...", command=self.extract_pages, state="disabled")
         self.extract_pages_button.pack(pady=5, fill="x")
+
+        self.add_margins_button = ctk.CTkButton(actions_frame, text="Aggiungi Margini...", command=self.open_add_margins_dialog, state="disabled")
+        self.add_margins_button.pack(pady=5, fill="x")
         
         self.save_button = ctk.CTkButton(actions_frame, text="Salva PDF Modificato...", command=self.save_modified_pdf, state="disabled", fg_color="green", hover_color="darkgreen")
         self.save_button.pack(pady=(15, 5), fill="x")
@@ -382,6 +459,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             self.trim_all_button.configure(state="normal")
             self.add_pages_button.configure(state="normal")
             self.extract_pages_button.configure(state="normal")
+            self.add_margins_button.configure(state="normal")
 
         except Exception as e:
             messagebox.showerror("Errore Visualizzazione", f"Impossibile mostrare dettagli pagina.\n\nDettagli: {e}", parent=self)
@@ -570,6 +648,82 @@ class PDFCheckerApp(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Errore Estrazione", f"Si è verificato un errore durante l'estrazione delle pagine.\n\nDettagli: {e}", parent=self)
 
+    def open_add_margins_dialog(self):
+        current_doc = self.modified_doc if self.modified_doc else self.doc
+        if not current_doc:
+            return
+        
+        dialog = AddMarginsDialog(self)
+        self.wait_window(dialog)
+        
+        if dialog.result:
+            self._apply_margins(dialog.result)
+
+    def _apply_margins(self, settings):
+        current_doc = self.modified_doc if self.modified_doc else self.doc
+        if not current_doc:
+            return
+
+        scope = settings["scope"]
+        page_indices = []
+
+        if scope == "current":
+            if self.active_page_index != -1:
+                page_indices.append(self.active_page_index)
+        elif scope == "all":
+            page_indices = list(range(len(current_doc)))
+        elif scope == "selected":
+            dialog = PageSelectionDialog(self, current_doc, title="Seleziona Pagine per Margini", button_text="Applica")
+            self.wait_window(dialog)
+            page_indices = dialog.selected_pages
+        
+        if not page_indices:
+            return
+
+        try:
+            self._ensure_modifiable_doc()
+            
+            margin_points = settings["margin_mm"] * 2.83465 # Convert mm to points
+            hex_color = settings["color_hex"].lstrip('#')
+            rgb_color = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
+            # Per evitare problemi con gli indici che cambiano, processa in ordine inverso
+            page_indices.sort(reverse=True)
+
+            for i in page_indices:
+                page = self.modified_doc[i]
+                original_rect = page.rect
+                
+                new_rect = fitz.Rect(
+                    original_rect.x0 - margin_points,
+                    original_rect.y0 - margin_points,
+                    original_rect.x1 + margin_points,
+                    original_rect.y1 + margin_points
+                )
+                
+                # Crea un documento temporaneo con la nuova pagina
+                temp_doc = fitz.open()
+                new_page = temp_doc.new_page(width=new_rect.width, height=new_rect.height)
+                
+                # Disegna lo sfondo colorato
+                new_page.draw_rect(new_page.rect, color=rgb_color, fill=rgb_color)
+                
+                # Inserisce il contenuto della vecchia pagina al centro della nuova
+                target_rect = fitz.Rect(margin_points, margin_points, new_rect.width - margin_points, new_rect.height - margin_points)
+                new_page.show_pdf_page(target_rect, self.modified_doc, i)
+                
+                # Sostituisce la pagina
+                self.modified_doc.delete_page(i)
+                self.modified_doc.insert_pdf(temp_doc, from_page=0, to_page=0, start_at=i)
+                temp_doc.close()
+
+            self.save_button.configure(state="normal")
+            self._populate_thumbnail_list()
+            messagebox.showinfo("Successo", f"Margini aggiunti a {len(page_indices)} pagina/e.", parent=self)
+
+        except Exception as e:
+            messagebox.showerror("Errore", f"Impossibile aggiungere i margini.\n\nDettagli: {e}", parent=self)
+
 
     def _clear_all(self):
         if self.doc: self.doc.close()
@@ -588,6 +742,7 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.trim_all_button.configure(state="disabled")
         self.add_pages_button.configure(state="disabled")
         self.extract_pages_button.configure(state="disabled")
+        self.add_margins_button.configure(state="disabled")
         self.save_button.configure(state="disabled")
 
 def create_tab(tab_view):
