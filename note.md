@@ -12,3 +12,9 @@ Le librerie principali da installare per l'applicazione WinFile sono:
 - packaging: per confrontare le versioni del software.
 - pyinstaller (opzionale): per creare un eseguibile dell'applicazione.
 - ctypes e wintypes (incorporati in Python): per la gestione degli appunti formattati su Windows.
+
+
+pip install -r versioni_plugin.txt
+
+SETUP
+C:\Users\michel\AppData\Local\Programs\Python\Python311\python.exe setup.py build
