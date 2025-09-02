@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v2.6
+# app_liste_anteprime.py - v4.0.5 (Logica Raggruppamento in CSV)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -13,6 +13,7 @@ import tempfile
 import base64
 import csv
 import html
+import functools
 
 # Import per la gestione avanzata degli appunti su Windows
 import ctypes
@@ -28,7 +29,7 @@ from reportlab.lib.pagesizes import A4, landscape
 Image.MAX_IMAGE_PIXELS = None
 
 # --- COSTANTI ---
-SUPPORTED_EXTENSIONS = ('.jpg', '.jpeg', '.tif', '.tiff', '.pdf', '.ai')
+SUPPORTED_EXTENSIONS = ('.jpg', '.jpeg', '.tif', '.tiff', '.pdf', '.ai', '.png')
 DEFAULT_DPI = 96
 PREVIEW_SIZE = (300, 300)
 
@@ -40,7 +41,6 @@ class ExportOptionsWindow(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Opzioni di Esportazione")
-        # Modifica: Aumentata la larghezza per contenere tutto il testo
         self.geometry("350x220")
         self.transient(parent)
         self.grab_set()
@@ -85,7 +85,7 @@ class ExportOptionsWindow(ctk.CTkToplevel):
 
 class FileScannerApp(ctk.CTkFrame):
     """
-    Classe principale dell'applicazione. Il Drag & Drop è gestito globalmente da winfile.py.
+    Classe principale dell'applicazione.
     """
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
@@ -95,87 +95,49 @@ class FileScannerApp(ctk.CTkFrame):
         self.preview_image = None
         self.scan_results = []
         self.is_scanning = False
-        
-        self.bottom_button_groups = [] # Lista per i gruppi di pulsanti in basso
+        self.sort_state = {'col': None, 'reverse': False}
+        self.bottom_button_groups = []
 
         self.create_widgets()
         self.create_context_menu()
         self.style_treeview()
-        
-        # Associa l'evento di ridimensionamento al frame dei controlli in basso
         self.bottom_controls_frame.bind('<Configure>', self._rearrange_button_groups)
 
-
     def handle_drop(self, event):
-        """
-        Questo metodo viene chiamato da winfile.py quando dei file vengono
-        rilasciati sulla finestra dell'applicazione.
-        """
-        if self.is_scanning:
-            return
-        
-        path_string = event.data
-        
+        if self.is_scanning: return
         try:
-            paths = self.tk.splitlist(path_string)
+            paths = self.tk.splitlist(event.data)
         except Exception:
             paths = []
-
-        if paths:
-            self.run_scan(paths)
-        else:
-            self.status_text.set("Nessun file o cartella valida trascinata.")
-            print(f"DEBUG: Impossibile interpretare i percorsi da event.data: '{event.data}'")
+        if paths: self.run_scan(paths)
+        else: self.status_text.set("Nessun file o cartella valida trascinata.")
 
     def _rearrange_button_groups(self, event=None):
-        """
-        Riorganizza i gruppi di pulsanti in basso in modo reattivo (a capo)
-        in base alla larghezza disponibile del frame contenitore.
-        """
-        if not self.winfo_viewable():
-            return
-            
+        if not self.winfo_viewable(): return
         available_width = self.bottom_controls_frame.winfo_width()
-        padding_x = 2
-        padding_y = 2
-        
-        cursor_x = padding_x
-        cursor_y = padding_y
-        row_height = 0
-
+        padding_x, padding_y = 2, 2
+        cursor_x, cursor_y, row_height = padding_x, padding_y, 0
         for group in self.bottom_button_groups:
-            group_width = group.winfo_reqwidth()
-            group_height = group.winfo_reqheight()
-
+            group_width, group_height = group.winfo_reqwidth(), group.winfo_reqheight()
             if cursor_x + group_width + padding_x > available_width and cursor_x > padding_x:
-                # Sposta il gruppo a una nuova riga
                 cursor_y += row_height + padding_y
                 cursor_x = padding_x
                 row_height = 0
-
             group.place(x=cursor_x, y=cursor_y)
             cursor_x += group_width + padding_x
-            
-            if group_height > row_height:
-                row_height = group_height
-
-        # Adatta l'altezza del frame contenitore
+            if group_height > row_height: row_height = group_height
         required_height = cursor_y + row_height + padding_y
         if self.bottom_controls_frame.winfo_reqheight() != required_height:
              self.bottom_controls_frame.configure(height=required_height)
 
-
     def create_widgets(self):
-        # --- Frame Superiore (solo gestione lista) ---
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", padx=10, pady=(10, 5))
-        
         self.select_button = ctk.CTkButton(top_frame, text="Aggiungi Cartella", command=self.select_folder_dialog)
         self.select_button.pack(side="left", padx=5, pady=5)
         self.clear_button = ctk.CTkButton(top_frame, text="Svuota Lista", command=self.clear_results, state="disabled")
         self.clear_button.pack(side="left", padx=5, pady=5)
 
-        # --- Frame Centrale (Lista e Anteprima) ---
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=10, pady=5)
         main_frame.grid_columnconfigure(0, weight=3); main_frame.grid_columnconfigure(1, weight=1); main_frame.grid_rowconfigure(0, weight=1)
@@ -188,25 +150,25 @@ class FileScannerApp(ctk.CTkFrame):
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings")
         self.tree.column("#0", width=30, stretch=False, anchor="center")
         self.tree.heading("#0", text="")
-        self.tree.heading("filename", text="Nome File / Pagina"); self.tree.heading("dimensions_cm", text="Dimensioni (cm)"); self.tree.heading("path", text="Percorso")
+        self.tree.heading("filename", text="Nome File / Pagina", command=lambda: self.sort_by_column("filename"))
+        self.tree.heading("dimensions_cm", text="Dimensioni (cm)", command=lambda: self.sort_by_column("dimensions_cm"))
+        self.tree.heading("path", text="Percorso", command=lambda: self.sort_by_column("path"))
         self.tree.column("filename", width=300); self.tree.column("dimensions_cm", width=150, anchor="center"); self.tree.column("path", width=350)
         scrollbar = ctk.CTkScrollbar(tree_frame, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); scrollbar.grid(row=0, column=1, sticky="ns")
         self.tree.bind("<<TreeviewSelect>>", self.on_item_select)
         self.tree.bind("<Button-3>", self.show_context_menu)
-        self.tree.bind("<Double-1>", self.open_selected_file) # Aggiunto binding per doppio click
+        self.tree.bind("<Double-1>", self.open_selected_file)
         
         preview_frame = ctk.CTkFrame(main_frame)
         preview_frame.grid(row=0, column=1, sticky="nsew")
         self.preview_label = ctk.CTkLabel(preview_frame, text="")
         self.preview_label.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # --- Frame Inferiore (Controlli Copia ed Esporta) ---
         self.bottom_controls_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.bottom_controls_frame.pack(fill="x", padx=10, pady=5)
 
-        # Gruppo Copia
         copy_frame = ctk.CTkFrame(self.bottom_controls_frame)
         ctk.CTkLabel(copy_frame, text="Copia").pack(anchor="w", pady=(2, 2), padx=10)
         self.copy_all_button = ctk.CTkButton(copy_frame, text="Copia Tabella", command=self.copy_all_to_clipboard, state="disabled")
@@ -215,12 +177,11 @@ class FileScannerApp(ctk.CTkFrame):
         self.copy_formatted_button.pack(side="left", padx=5, pady=(0, 5))
         self.bottom_button_groups.append(copy_frame)
 
-        # Gruppo Esporta/Stampa
         export_frame = ctk.CTkFrame(self.bottom_controls_frame)
         ctk.CTkLabel(export_frame, text="Esporta / Stampa").pack(anchor="w", pady=(2, 2), padx=10)
         self.print_button = ctk.CTkButton(export_frame, text="Stampa Tabella", command=lambda: self.print_table(selection_mode=False), state="disabled")
         self.print_button.pack(side="left", padx=5, pady=(0, 5))
-        self.export_html_button = ctk.CTkButton(export_frame, text="Anteprima HTML", command=self.export_to_html, state="disabled")
+        self.export_html_button = ctk.CTkButton(export_frame, text="Anteprima Miniature", command=self.export_to_html, state="disabled")
         self.export_html_button.pack(side="left", padx=5, pady=(0, 5))
         self.export_csv_button = ctk.CTkButton(export_frame, text="Esporta in CSV", command=lambda: self.export_to_csv(selection_mode=False), state="disabled")
         self.export_csv_button.pack(side="left", padx=5, pady=(0, 5))
@@ -228,828 +189,1071 @@ class FileScannerApp(ctk.CTkFrame):
         self.export_pdf_button.pack(side="left", padx=5, pady=(0, 5))
         self.bottom_button_groups.append(export_frame)
 
-        # --- Barra di Stato ---
         status_bar = ctk.CTkFrame(self, height=30)
         status_bar.pack(side="bottom", fill="x", padx=10, pady=(5, 10))
         status_label = ctk.CTkLabel(status_bar, textvariable=self.status_text, anchor="w")
         status_label.pack(side="left", padx=10)
+    
+    def sort_by_column(self, col):
+        if not self.scan_results: return
+        if self.sort_state['col'] == col: self.sort_state['reverse'] = not self.sort_state['reverse']
+        else: self.sort_state['col'], self.sort_state['reverse'] = col, False
+        
+        if col == "filename": 
+            sort_key = lambda item: item['filename'].lower()
+        elif col == "path": 
+            sort_key = lambda item: os.path.relpath(item['path'], item.get('scan_root', '')).lower()
+        elif col == "dimensions_cm":
+            def get_area(item):
+                try: return item['pages_details'][0]['width_cm'] * item['pages_details'][0]['height_cm']
+                except (IndexError, KeyError): return 0
+            sort_key = get_area
+        else: return
+
+        self.scan_results.sort(key=sort_key, reverse=self.sort_state['reverse'])
+        self.update_column_headings()
+        self.repopulate_treeview()
+
+    def update_column_headings(self):
+        for col in ("filename", "dimensions_cm", "path"):
+            original_text = self.tree.heading(col, "text").split(" ")[0]
+            if col == "filename": original_text = "Nome File / Pagina"
+            elif col == "dimensions_cm": original_text = "Dimensioni (cm)"
+            elif col == "path": original_text = "Percorso"
+            
+            if col == self.sort_state['col']:
+                arrow = '▼' if self.sort_state['reverse'] else '▲'
+                self.tree.heading(col, text=f"{original_text} {arrow}")
+            else:
+                 self.tree.heading(col, text=original_text)
 
     def _lock_ui(self):
-        """Disabilita i pulsanti durante un'operazione lunga per evitare input multipli."""
-        self.select_button.configure(state="disabled")
-        self.clear_button.configure(state="disabled")
-        self.copy_all_button.configure(state="disabled")
-        self.copy_formatted_button.configure(state="disabled")
-        self.print_button.configure(state="disabled")
-        self.export_html_button.configure(state="disabled")
-        self.export_pdf_button.configure(state="disabled")
-        self.export_csv_button.configure(state="disabled")
+        for button in [self.select_button, self.clear_button, self.copy_all_button, self.copy_formatted_button, self.print_button, self.export_html_button, self.export_pdf_button, self.export_csv_button]:
+            button.configure(state="disabled")
 
     def _unlock_ui(self):
-        """Riabilita i pulsanti dopo un'operazione, rispettando lo stato attuale (es. se ci sono risultati)."""
         self.select_button.configure(state="normal")
         state = "normal" if self.scan_results else "disabled"
-        self.clear_button.configure(state=state)
-        self.copy_all_button.configure(state=state)
-        self.copy_formatted_button.configure(state=state)
-        self.print_button.configure(state=state)
-        self.export_html_button.configure(state=state)
-        self.export_pdf_button.configure(state=state)
-        self.export_csv_button.configure(state=state)
+        for button in [self.clear_button, self.copy_all_button, self.copy_formatted_button, self.print_button, self.export_html_button, self.export_pdf_button, self.export_csv_button]:
+            button.configure(state=state)
 
     def create_context_menu(self):
-        font_size = 13
-        self.option_add("*Menu.font", ("Segoe UI", font_size))
-        
+        self.option_add("*Menu.font", ("Segoe UI", 13))
         self.context_menu = Menu(self, tearoff=0)
         self.context_menu.add_command(label="Copia selezione negli appunti", command=self.copy_selection_to_clipboard)
         self.context_menu.add_command(label="Copia selezione formattata", command=lambda: self.copy_formatted_to_clipboard(selection_mode=True))
         self.context_menu.add_command(label="Stampa selezione", command=lambda: self.print_table(selection_mode=True))
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Esporta selezione in CSV", command=lambda: self.export_to_csv(selection_mode=True))
-        self.context_menu.add_command(label="Crea Anteprima HTML...", command=lambda: self.export_to_html(selection_mode=True))
+        self.context_menu.add_command(label="Crea Anteprima Miniature...", command=lambda: self.export_to_html(selection_mode=True))
         self.context_menu.add_command(label="Esporta selezione in PDF", command=lambda: self.export_to_pdf(selection_mode=True))
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Rimuovi selezionati", command=self.remove_selected_items)
 
     def show_context_menu(self, event):
-        if self.tree.selection():
-            self.context_menu.post(event.x_root, event.y_root)
+        if self.tree.selection(): self.context_menu.post(event.x_root, event.y_root)
 
     def style_treeview(self):
         style = ttk.Style()
-        
-        font_size = 13
-        row_height = 28
-        
+        font, row_height = ("Segoe UI", 13), 28
         if ctk.get_appearance_mode() == "Dark":
-            bg_color, text_color, field_bg_color = "#2B2B2B", "white", "#343638"
-            selected_color, odd_row, even_row = "#1f6aa5", "#242424", "#2B2B2B"
+            bg, fg, field_bg = "#2B2B2B", "white", "#343638"
+            sel, odd, even = "#1f6aa5", "#242424", "#2B2B2B"
+            folder_bg = "#343638"
         else:
-            bg_color, text_color, field_bg_color = "white", "black", "#EAEAEA"
-            selected_color, odd_row, even_row = "#3484d0", "#F7F7F7", "white"
-        
+            bg, fg, field_bg = "white", "black", "#EAEAEA"
+            sel, odd, even = "#3484d0", "#F7F7F7", "white"
+            folder_bg = "#E0E0E0"
         style.theme_use("default")
-        
-        style.configure("Treeview", 
-                        background=bg_color, 
-                        foreground=text_color, 
-                        fieldbackground=field_bg_color, 
-                        borderwidth=0,
-                        font=("Segoe UI", font_size),
-                        rowheight=row_height)
-                        
-        style.map('Treeview', background=[('selected', selected_color)])
-        
-        style.configure("Treeview.Heading", 
-                        background=field_bg_color, 
-                        foreground=text_color, 
-                        relief="flat",
-                        font=("Segoe UI", font_size + 1, "bold"))
-                        
-        style.map("Treeview.Heading", background=[('active', selected_color)])
-        
-        self.tree.tag_configure('oddrow', background=odd_row)
-        self.tree.tag_configure('evenrow', background=even_row)
+        style.configure("Treeview", background=bg, foreground=fg, fieldbackground=field_bg, borderwidth=0, font=font, rowheight=row_height)
+        style.map('Treeview', background=[('selected', sel)])
+        style.configure("Treeview.Heading", background=field_bg, foreground=fg, relief="flat", font=(font[0], font[1] + 1, "bold"))
+        style.map("Treeview.Heading", background=[('active', sel)])
+        self.tree.tag_configure('oddrow', background=odd)
+        self.tree.tag_configure('evenrow', background=even)
+        self.tree.tag_configure('folder_row', background=folder_bg, font=(font[0], font[1], "bold"))
 
     def get_file_details(self, file_path):
         try:
             ext = os.path.splitext(file_path)[1].lower()
             details = {"filename": os.path.basename(file_path), "type": ext.replace('.', '').upper(), "path": os.path.dirname(file_path)}
-            
-            if ext in ('.jpg', '.jpeg', '.tif', '.tiff'):
+            if ext in ('.jpg', '.jpeg', '.tif', '.tiff', '.png'):
                 with Image.open(file_path) as img:
-                    width_px, height_px = img.size; dpi_x, dpi_y = img.info.get('dpi', (DEFAULT_DPI, DEFAULT_DPI))
-                    if dpi_x == 0: dpi_x = DEFAULT_DPI
-                    if dpi_y == 0: dpi_y = DEFAULT_DPI
-                    width_cm = (width_px/dpi_x)*2.54; height_cm = (height_px/dpi_y)*2.54
-                    details.update({"page_count": 1, "pages_details": [{"dimensions_cm": f"{width_cm:.2f} x {height_cm:.2f}", "width_cm": width_cm, "height_cm": height_cm}], "dpi_str": f"{int(dpi_x)} DPI"})
+                    w_px, h_px = img.size; dpi_x, dpi_y = img.info.get('dpi', (DEFAULT_DPI, DEFAULT_DPI))
+                    w_cm = (w_px / (dpi_x or DEFAULT_DPI)) * 2.54; h_cm = (h_px / (dpi_y or DEFAULT_DPI)) * 2.54
+                    details.update({"w_px": w_px, "h_px": h_px, "page_count": 1, "pages_details": [{"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm}], "dpi_str": f"{int(dpi_x or DEFAULT_DPI)} DPI"})
                     return details
-            
             elif ext in ('.pdf', '.ai'):
                 try:
                     with fitz.open(file_path) as doc:
-                        if len(doc) == 0: raise ValueError("Documento vuoto")
+                        if not doc: raise ValueError("Documento vuoto")
                         pages_details = []
-                        for page in doc:
-                            rect = page.rect; width_cm = (rect.width/72)*2.54; height_cm = (rect.height/72)*2.54
-                            pages_details.append({"dimensions_cm": f"{width_cm:.2f} x {height_cm:.2f}", "width_cm": width_cm, "height_cm": height_cm})
-                        details.update({"type": "AI" if ext == '.ai' else "PDF", "page_count": doc.page_count, "pages_details": pages_details})
+                        for i, page in enumerate(doc):
+                            rect = page.rect; w_cm, h_cm = (rect.width/72)*2.54, (rect.height/72)*2.54
+                            aspect_ratio = rect.width / rect.height if rect.height else 1
+                            pages_details.append({"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm, "aspect_ratio": aspect_ratio})
+                        details.update({"page_count": len(doc), "pages_details": pages_details, "type": "AI" if ext == '.ai' else "PDF"})
                         return details
                 except Exception:
-                    details.update({"type": "AI (Non compatibile)" if ext == '.ai' else "PDF (Danneggiato)", "page_count": 1, "pages_details": [{"dimensions_cm": "Non rilevabili", "width_cm": 0, "height_cm": 0}]})
+                    details.update({"type": "AI (Non compatibile)" if ext == '.ai' else "PDF (Danneggiato)", "page_count": 1, "pages_details": [{"dimensions_cm": "Non rilevabili", "width_cm": 0, "height_cm": 0, "aspect_ratio": 1}]})
                     return details
-                    
         except Exception as e:
-            print(f"Errore generale nell'analisi del file {file_path}: {e}")
-            return {"filename": os.path.basename(file_path), "type": "ERRORE", "path": os.path.dirname(file_path), "page_count": 1, "pages_details": [{"dimensions_cm": "Errore lettura", "width_cm": 0, "height_cm": 0}]}
+            print(f"Errore analisi file {file_path}: {e}")
+            return {"filename": os.path.basename(file_path), "type": "ERRORE", "path": os.path.dirname(file_path), "page_count": 1, "pages_details": [{"dimensions_cm": "Errore lettura", "width_cm": 0, "height_cm": 0, "aspect_ratio": 1}]}
+
+    def update_scan_progress(self, current_path, count):
+        """Aggiorna la barra di stato in modo sicuro dal thread principale."""
+        self.status_text.set(f"Scansione: {os.path.basename(current_path)}... ({count} file trovati)")
 
     def process_paths(self, paths):
-        self.status_text.set("Scansione in corso...")
         self._lock_ui()
         found_files = []
         for path in paths:
             scan_root = os.path.normpath(path)
             if os.path.isdir(scan_root):
                 for root_dir, _, files in os.walk(scan_root):
+                    self.after(0, self.update_scan_progress, root_dir, len(found_files))
                     for file in files:
                         if file.lower().endswith(SUPPORTED_EXTENSIONS):
                             full_path = os.path.join(root_dir, file)
-                            details = self.get_file_details(full_path)
-                            if details:
+                            if details := self.get_file_details(full_path):
                                 details['scan_root'] = scan_root
                                 found_files.append(details)
             elif os.path.isfile(scan_root) and scan_root.lower().endswith(SUPPORTED_EXTENSIONS):
-                details = self.get_file_details(scan_root)
-                if details:
+                if details := self.get_file_details(scan_root):
                     details['scan_root'] = os.path.dirname(scan_root)
                     found_files.append(details)
         self.after(0, self.add_scan_results, found_files)
 
     def add_scan_results(self, new_files):
         self.scan_results.extend(new_files)
-        
-        unique_results = []; seen_paths = set()
+        unique_results, seen_paths = [], set()
         for item in self.scan_results:
             full_path = os.path.join(item['path'], item['filename'])
             if full_path not in seen_paths:
                 unique_results.append(item); seen_paths.add(full_path)
         self.scan_results = unique_results
-        
-        self.repopulate_treeview()
+        if self.sort_state['col']: self.sort_by_column(self.sort_state['col'])
+        else: self.repopulate_treeview()
 
     def _get_display_path(self, file_info):
-        normalized_path = os.path.normpath(file_info['path'])
-        scan_root = os.path.normpath(file_info.get('scan_root', ''))
-        
-        if not scan_root: return os.path.basename(normalized_path)
+        scan_root = file_info.get('scan_root', '')
+        if not scan_root: return file_info['path']
         try:
-            if os.path.splitdrive(normalized_path)[0].upper() == os.path.splitdrive(scan_root)[0].upper():
-                relative_path = os.path.relpath(normalized_path, scan_root)
-                base_name = os.path.basename(scan_root)
-                return os.path.join(base_name, relative_path) if relative_path != '.' else base_name
-            else: return os.path.basename(normalized_path)
-        except ValueError: return os.path.basename(normalized_path)
+            rel_path = os.path.relpath(file_info['path'], scan_root)
+            return "." if rel_path == "." else rel_path
+        except ValueError:
+            return file_info['path']
 
     def repopulate_treeview(self):
-        """
-        Popola il Treeview con una struttura gerarchica per i file multi-pagina.
-        """
-        for i in self.tree.get_children():
-            self.tree.delete(i)
+        selection = self.tree.selection()
+        open_items = {item for item in self.tree.get_children() if self.tree.item(item, "open")}
         
-        total_rows = 0
-        for file_index, file_info in enumerate(self.scan_results):
-            page_count = file_info.get('page_count', 1)
-            tag = 'evenrow' if file_index % 2 == 0 else 'oddrow'
-            
-            if page_count > 1:
-                parent_id = f"file_{file_index}"
-                filename_display = f"{file_info['filename']} ({page_count} pagine)"
-                display_path = self._get_display_path(file_info).replace('\\', '/')
-                self.tree.insert("", "end", iid=parent_id, values=(filename_display, "Multi-pagina", display_path), tags=(tag,), open=False)
-                
-                for page_num in range(page_count):
-                    page_details = file_info["pages_details"][page_num]
-                    child_filename_display = f"   Pagina {page_num + 1}"
-                    child_dimensions_display = page_details["dimensions_cm"]
-                    child_id = f"{file_index}_{page_num}"
-                    self.tree.insert(parent_id, "end", iid=child_id, values=(child_filename_display, child_dimensions_display, ""), tags=(tag,))
-                total_rows += page_count
-            else:
-                page_details = file_info["pages_details"][0]
-                filename_display = file_info['filename']
-                display_path = self._get_display_path(file_info).replace('\\', '/')
-                dimensions_display = page_details["dimensions_cm"]
-                item_id = f"{file_index}_0"
-                self.tree.insert("", "end", iid=item_id, values=(filename_display, dimensions_display, display_path), tags=(tag,))
-                total_rows += 1
+        self.tree.delete(*self.tree.get_children())
 
-        self.status_text.set(f"Scansione completata. Trovati {len(self.scan_results)} file ({total_rows} pagine/elementi).")
-        self.preview_label.configure(image=None)
-        
+        grouped_results = defaultdict(list)
+        for item in self.scan_results:
+            grouped_results[item.get('scan_root', 'N/A')].append(item)
+
+        total_rows = 0
+        sorted_scan_roots = sorted(grouped_results.keys())
+
+        for i, scan_root in enumerate(sorted_scan_roots):
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            folder_id = f"folder_{scan_root}"
+            is_open = folder_id in open_items or not open_items # Apri di default alla prima esecuzione
+            
+            # Inserisce la riga della cartella di origine
+            self.tree.insert("", "end", iid=folder_id, values=(os.path.basename(scan_root), f"({len(grouped_results[scan_root])} file)", scan_root),
+                             open=is_open, tags=('folder_row',))
+            
+            for file_info in grouped_results[scan_root]:
+                path_id = os.path.join(file_info['path'], file_info['filename'])
+                display_path = self._get_display_path(file_info)
+
+                if (page_count := file_info.get('page_count', 1)) > 1:
+                    parent_id = f"file_{path_id}"
+                    self.tree.insert(folder_id, "end", iid=parent_id, values=(f"{file_info['filename']} ({page_count} pagine)", "Multi-pagina", display_path), 
+                                     tags=(tag,), open=(parent_id in open_items))
+                    for page_num in range(page_count):
+                        self.tree.insert(parent_id, "end", iid=f"{path_id}_{page_num}", values=(f"   Pagina {page_num + 1}", file_info["pages_details"][page_num]["dimensions_cm"], ""), tags=(tag,))
+                    total_rows += page_count
+                else:
+                    self.tree.insert(folder_id, "end", iid=f"{path_id}_0", values=(file_info['filename'], file_info["pages_details"][0]["dimensions_cm"], display_path), tags=(tag,))
+                    total_rows += 1
+
+        if selection:
+            try: self.tree.selection_set(selection)
+            except Exception: pass
+            
+        self.status_text.set(f"Scansione completata. Trovati {len(self.scan_results)} file ({total_rows} elementi) in {len(sorted_scan_roots)} cartelle.")
+        if not selection: self.preview_label.configure(image=None)
         self._unlock_ui()
         self.is_scanning = False
+    
+    def _find_item_data_by_id(self, item_id):
+        if not item_id or item_id.startswith("folder_"): return None, -1
+        
+        path_part, page_to_show = item_id.replace("file_", ""), 0
+        if "_" in os.path.basename(path_part):
+            try:
+                base_path, page_str = path_part.rsplit('_', 1)
+                page_to_show = int(page_str)
+                path_part = base_path
+            except ValueError: pass
+            
+        for data in self.scan_results:
+            if os.path.join(data['path'], data['filename']) == path_part:
+                return data, page_to_show
+        return None, -1
 
     def select_folder_dialog(self):
         if self.is_scanning: return
-        folder = filedialog.askdirectory(parent=self)
-        if folder: self.run_scan([folder])
+        if folder := filedialog.askdirectory(parent=self): self.run_scan([folder])
 
     def run_scan(self, paths):
         self.is_scanning = True
         self.status_text.set("Avvio scansione...")
-        scan_thread = threading.Thread(target=self.process_paths, args=(paths,), daemon=True)
-        scan_thread.start()
+        threading.Thread(target=self.process_paths, args=(paths,), daemon=True).start()
 
     def clear_results(self):
         self.scan_results = []
-        for i in self.tree.get_children(): self.tree.delete(i)
+        self.sort_state = {'col': None, 'reverse': False}
+        self.update_column_headings()
+        self.tree.delete(*self.tree.get_children())
         self.status_text.set("Lista svuotata. Pronto per una nuova scansione.")
         self.preview_label.configure(image=None)
         self._unlock_ui()
 
     def on_item_select(self, event):
-        """
-        Gestisce la selezione di un elemento nella lista per mostrare l'anteprima.
-        Funziona sia per le righe madri che per le pagine figlie.
-        """
-        selected_items = self.tree.selection()
-        if not selected_items: return
-        
-        selected_id = selected_items[0]
-        
-        if selected_id.startswith("file_"):
-            file_index_str = selected_id.split('_')[1]
-            item_index = int(file_index_str)
-            page_to_show = 0
-        else:
-            file_index_str, page_num_str = selected_id.split('_')
-            item_index = int(file_index_str)
-            page_to_show = int(page_num_str)
-        
-        selected_data = self.scan_results[item_index]
+        if not (sel := self.tree.selection()): return
+        selected_data, page_to_show = self._find_item_data_by_id(sel[0])
+        if not selected_data: 
+            self.preview_label.configure(image=None)
+            return
         full_path = os.path.join(selected_data['path'], selected_data['filename'])
-        
         try:
             if selected_data['type'] in ('PDF', 'AI'):
                 with fitz.open(full_path) as doc:
-                    page = doc.load_page(page_to_show); pix = page.get_pixmap()
+                    pix = doc.load_page(page_to_show).get_pixmap()
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            else:
-                img = Image.open(full_path)
-            
+            else: img = Image.open(full_path)
             img.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
-            self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+            self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.preview_label.configure(image=self.preview_image)
-
         except Exception as e:
-            self.status_text.set(f"Impossibile generare anteprima per {selected_data['filename']}.")
+            self.status_text.set(f"Impossibile generare anteprima.")
             print(f"Errore anteprima: {e}"); self.preview_label.configure(image=None)
 
     def open_selected_file(self, event):
-        """Apre il file selezionato con l'applicazione predefinita del sistema."""
-        selected_id = self.tree.focus()
-        if not selected_id:
-            return
-
-        if selected_id.startswith("file_"):
-            file_index = int(selected_id.split('_')[1])
-        else:
-            file_index = int(selected_id.split('_')[0])
-
+        if not (focus_id := self.tree.focus()): return
+        if focus_id.startswith("folder_"):
+             try:
+                folder_path = self.tree.item(focus_id, "values")[2]
+                if os.path.exists(folder_path): os.startfile(os.path.realpath(folder_path))
+                else: messagebox.showerror("Errore", f"Cartella non trovata:\n{folder_path}", parent=self)
+             except Exception as e: messagebox.showerror("Errore Apertura", f"Impossibile aprire la cartella.\n{e}", parent=self)
+             return
+        
+        selected_data, _ = self._find_item_data_by_id(focus_id)
+        if not selected_data: return print(f"Dati non validi: {focus_id}")
         try:
-            selected_data = self.scan_results[file_index]
             full_path = os.path.join(selected_data['path'], selected_data['filename'])
-            
-            if os.path.exists(full_path):
-                os.startfile(os.path.realpath(full_path))
-            else:
-                messagebox.showerror("Errore", f"File non trovato:\n{full_path}", parent=self)
-        except IndexError:
-            print(f"Indice non valido per la selezione: {selected_id}")
-        except Exception as e:
-            messagebox.showerror("Errore Apertura File", f"Impossibile aprire il file.\n\nDettagli: {e}", parent=self)
+            if os.path.exists(full_path): os.startfile(os.path.realpath(full_path))
+            else: messagebox.showerror("Errore", f"File non trovato:\n{full_path}", parent=self)
+        except Exception as e: messagebox.showerror("Errore Apertura", f"Impossibile aprire il file.\n{e}", parent=self)
 
     def remove_selected_items(self):
-        """Rimuove i file selezionati dalla lista."""
-        selected_iids = self.tree.selection()
-        if not selected_iids:
-            messagebox.showinfo("Informazione", "Nessun file selezionato da rimuovere.", parent=self)
-            return
-
-        indices_to_remove = set()
-        for iid in selected_iids:
-            if iid.startswith("file_"):
-                index = int(iid.split('_')[1])
+        if not (sel := self.tree.selection()): return
+        paths_to_remove = set()
+        folders_to_remove = set()
+        
+        for iid in sel:
+            if iid.startswith("folder_"):
+                folders_to_remove.add(self.tree.item(iid, "values")[2])
             else:
-                index = int(iid.split('_')[0])
-            indices_to_remove.add(index)
-        
-        # Ricostruisce la lista dei risultati escludendo gli indici da rimuovere
-        self.scan_results = [item for i, item in enumerate(self.scan_results) if i not in indices_to_remove]
-        
-        # Ripopola la vista ad albero
+                data, _ = self._find_item_data_by_id(iid)
+                if data:
+                    paths_to_remove.add(os.path.join(data['path'], data['filename']))
+
+        self.scan_results = [
+            item for item in self.scan_results 
+            if (os.path.join(item['path'], item['filename']) not in paths_to_remove and
+                item.get('scan_root') not in folders_to_remove)
+        ]
         self.repopulate_treeview()
 
-
     def get_pages_for_selection(self, selection_mode=False):
-        """
-        Restituisce una lista di dizionari, ognuno rappresentante una pagina
-        da esportare. Contiene i dati del file originale e il numero di pagina.
-        """
-        pages_to_export = []
-        
         if not selection_mode:
-            for file_index, file_info in enumerate(self.scan_results):
-                for page_num in range(file_info.get('page_count', 1)):
-                    pages_to_export.append({'file_info': file_info, 'page_num': page_num})
-            return pages_to_export
-
-        selected_iids = self.tree.selection()
-        if not selected_iids:
-            return []
-
-        unique_pages = set()
-
-        for iid in selected_iids:
-            if iid.startswith("file_"):
-                file_index = int(iid.split('_')[1])
-                file_info = self.scan_results[file_index]
-                for page_num in range(file_info.get('page_count', 1)):
-                    unique_pages.add((file_index, page_num))
+            return [{'file_info': fi, 'page_num': pn} for fi in self.scan_results for pn in range(fi.get('page_count', 1))]
+        if not (sel := self.tree.selection()): return []
+        
+        selected_pages_set = set()
+        for iid in sel:
+            if iid.startswith("folder_"):
+                folder_path = self.tree.item(iid, "values")[2]
+                for item in self.scan_results:
+                    if item.get('scan_root') == folder_path:
+                         for pn in range(item.get('page_count', 1)):
+                            selected_pages_set.add((item['path'], item['filename'], pn))
             else:
-                file_index, page_num = map(int, iid.split('_'))
-                unique_pages.add((file_index, page_num))
-                
-        for file_index, page_num in sorted(list(unique_pages)):
-            pages_to_export.append({'file_info': self.scan_results[file_index], 'page_num': page_num})
-            
-        return pages_to_export
+                data, page_num = self._find_item_data_by_id(iid)
+                if data:
+                    if iid.startswith("file_"): # Multi-pagina, aggiungi tutte le pagine
+                         for pn in range(data.get('page_count', 1)):
+                            selected_pages_set.add((data['path'], data['filename'], pn))
+                    else: # Pagina singola o file singolo
+                        selected_pages_set.add((data['path'], data['filename'], page_num))
 
-    def _get_all_data_rows(self):
-        """Funzione di supporto per ottenere tutti gli ID delle righe di dati (pagine o file singoli)."""
-        data_rows = []
-        for parent_id in self.tree.get_children(""):
-            if parent_id.startswith("file_"):
-                data_rows.extend(self.tree.get_children(parent_id))
-            else:
-                data_rows.append(parent_id)
-        return data_rows
+        # Ricostruisci la lista di dizionari nell'ordine originale
+        all_pages = [{'file_info': fi, 'page_num': pn} for fi in self.scan_results for pn in range(fi.get('page_count', 1))]
+        selected_pages = [p for p in all_pages if (p['file_info']['path'], p['file_info']['filename'], p['page_num']) in selected_pages_set]
+        return selected_pages
 
-    def _get_data_rows_from_selection(self, selected_iids):
-        """Funzione di supporto per ottenere gli ID delle righe di dati da una selezione."""
-        data_rows = []
-        for iid in selected_iids:
-            if iid.startswith("file_"):
-                data_rows.extend(self.tree.get_children(iid))
-            else:
-                data_rows.append(iid)
-        return sorted(list(set(data_rows)))
-
-    def copy_all_to_clipboard(self):
-        if not self.scan_results: return
-        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso"]
-        lines = ["\t".join(header)]
-        
-        all_data_rows = self._get_all_data_rows()
-        
-        for item_id in all_data_rows:
-            values = list(self.tree.item(item_id)['values'])
-            if not values[2]:
-                file_index = int(item_id.split('_')[0])
-                file_info = self.scan_results[file_index]
-                values[2] = self._get_display_path(file_info).replace('\\', '/')
-            lines.append("\t".join(map(str, values)))
-        
-        self.clipboard_clear(); self.clipboard_append("\n".join(lines))
-        self.status_text.set("Tabella copiata negli appunti.")
-
-    def copy_selection_to_clipboard(self):
-        selected_items = self.tree.selection()
-        if not selected_items: return
-        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso"]
-        lines = ["\t".join(header)]
-        
-        items_to_copy = self._get_data_rows_from_selection(selected_items)
-        
-        for item_id in items_to_copy:
-            values = list(self.tree.item(item_id)['values'])
-            if not values[2]:
-                file_index = int(item_id.split('_')[0])
-                file_info = self.scan_results[file_index]
-                values[2] = self._get_display_path(file_info).replace('\\', '/')
-            lines.append("\t".join(map(str, values)))
-
-        self.clipboard_clear(); self.clipboard_append("\n".join(lines))
-        self.status_text.set(f"Selezione copiata negli appunti ({len(lines)-1} righe).")
-
-    def print_table(self, selection_mode=False):
-        pages_to_print = self.get_pages_for_selection(selection_mode)
-        if not pages_to_print:
-            messagebox.showinfo("Informazione", "Nessuna riga da stampare.", parent=self); return
-        
-        html_string = self._generate_html_table_with_totals(pages_to_print)
-
-        html_content = f"""
-        <!DOCTYPE html><html><head><meta charset='UTF-8'><title>Stampa Tabella</title>
-        <style>
-            @media print {{ @page {{ margin: 1.5cm; }} body {{ font-family: sans-serif; -webkit-print-color-adjust: exact; }}
-            table {{ width: 100%; border-collapse: collapse; }} th, td {{ border: 1px solid black; padding: 5px; text-align: left; }}
-            th {{ background-color: #e0e0e0 !important; }} tfoot {{ background-color: #f0f0f0 !important; font-weight: bold;}}
-        </style></head><body onload="window.print()">{html_string}</body></html>"""
-        
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
-                f.write(html_content)
-            webbrowser.open(f'file://{os.path.realpath(f.name)}')
-            self.status_text.set("Apertura anteprima di stampa nel browser...")
-        except Exception as e:
-            traceback.print_exc()
-            self.status_text.set("Errore durante la preparazione della stampa.")
-            messagebox.showerror("Errore di Stampa", f"Impossibile aprire l'anteprima di stampa.\nErrore: {e}", parent=self)
-
-    def export_to_csv(self, selection_mode=False):
-        pages_to_export = self.get_pages_for_selection(selection_mode)
-        if not pages_to_export:
-            messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
-            return
-        
-        self._lock_ui()
-        file_path = filedialog.asksaveasfilename(parent=self, defaultextension=".csv", filetypes=[("File CSV", "*.csv")], title="Salva lista come CSV")
-        
-        if not file_path:
-            self.status_text.set("Esportazione CSV annullata.")
-            self._unlock_ui()
-            return
-
-        self.status_text.set("Creazione del file CSV in corso...")
-        self.update_idletasks()
-        
-        thread = threading.Thread(target=self._build_csv_thread, args=(file_path, pages_to_export), daemon=True)
-        thread.start()
-
-    def _build_csv_thread(self, file_path, pages_to_export):
-        try:
-            with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f, delimiter=';')
-                writer.writerow(["Nome File", "Tipo", "Pagina", "Dimensioni (cm)", "Area (m²)", "Percorso Relativo"])
-                
-                for page_data in pages_to_export:
-                    item = page_data['file_info']
-                    page_num = page_data['page_num']
-                    
-                    display_path = self._get_display_path(item).replace('\\', '/')
-                    page_details = item['pages_details'][page_num]
-                    page_count = item.get('page_count', 1)
-                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
-                    page_str = f"{page_num + 1} di {page_count}"
-                    writer.writerow([item['filename'], item['type'], page_str, page_details['dimensions_cm'], f"{area_sqm:.4f}", display_path])
-            
-            self.after(0, self.on_csv_success, file_path)
-        except Exception as e:
-            self.after(0, self.on_csv_error, e)
-
-    def on_csv_success(self, file_path):
-        self.status_text.set("File CSV creato con successo.")
-        self._unlock_ui()
-        self.update()
-        messagebox.showinfo("Successo", f"Lista esportata con successo in:\n{file_path}", parent=self)
-
-    def on_csv_error(self, e):
-        traceback.print_exc()
-        self.status_text.set("Errore durante la creazione del CSV.")
-        self._unlock_ui()
-        self.update()
-        messagebox.showerror("Errore", f"Impossibile creare il file CSV.\nErrore: {e}", parent=self)
 
     def export_to_html(self, selection_mode=False):
         pages_to_export = self.get_pages_for_selection(selection_mode)
         if not pages_to_export:
-            messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
-            return
-
+            return messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
         self._lock_ui()
-        self.status_text.set("Preparazione anteprima HTML in corso...")
+        self.status_text.set("Preparazione anteprima miniature...")
         self.update_idletasks()
-        
-        thread = threading.Thread(target=self._build_html_thread, args=(pages_to_export,), daemon=True)
-        thread.start()
+        threading.Thread(target=self._build_html_thread, args=(pages_to_export,), daemon=True).start()
 
     def _build_html_thread(self, pages_to_export):
         try:
             html_content = self._generate_html_content(pages_to_export)
-            
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
                 temp_file_path = f.name
                 f.write(html_content)
-            
             self.after(0, self.on_html_success, temp_file_path)
-        except Exception as e:
-            self.after(0, self.on_html_error, e)
+        except Exception as e: self.after(0, self.on_html_error, e)
 
     def on_html_success(self, file_path):
         try:
-            # Usa os.startfile su Windows per un'apertura più affidabile
-            if os.name == 'nt':
-                os.startfile(os.path.realpath(file_path))
-            else:
-                # Fallback per altri sistemi operativi (macOS, Linux)
-                webbrowser.open(f'file://{os.path.realpath(file_path)}')
-            self.status_text.set("Anteprima HTML creata con successo.")
+            if os.name == 'nt': os.startfile(os.path.realpath(file_path))
+            else: webbrowser.open(f'file://{os.path.realpath(file_path)}')
+            self.status_text.set("Anteprima miniature creata con successo.")
         except Exception as e:
-            self.status_text.set("Errore nell'apertura dell'anteprima.")
-            messagebox.showerror("Errore Apertura", f"Impossibile aprire il file HTML nel browser.\n\nDettagli: {e}", parent=self)
-        finally:
-            self._unlock_ui()
-            self.update()
+            self.status_text.set("Errore apertura anteprima.")
+            messagebox.showerror("Errore Apertura", f"Impossibile aprire il file HTML.\n{e}", parent=self)
+        finally: self._unlock_ui(); self.update()
 
     def on_html_error(self, e):
         traceback.print_exc()
-        self.status_text.set("Errore durante la creazione dell'anteprima HTML.")
-        self._unlock_ui()
-        self.update()
-        messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\nErrore: {e}", parent=self)
+        self.status_text.set("Errore durante la creazione dell'anteprima.")
+        self._unlock_ui(); self.update()
+        messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\n{e}", parent=self)
 
     def _generate_html_content(self, pages_to_export):
         grouped_pages = defaultdict(list)
+        selected_pages_keys = {(os.path.join(p['file_info']['path'], p['file_info']['filename']), p['page_num']) for p in pages_to_export}
+        
         for page in pages_to_export:
-            grouped_pages[page['file_info']['scan_root']].append(page)
-            
+             full_path = os.path.join(page['file_info']['path'], page['file_info']['filename'])
+             if (full_path, page['page_num']) in selected_pages_keys:
+                # Usa scan_root per il raggruppamento
+                grouped_pages[page['file_info']['scan_root']].append(page)
+
         file_colors = ['#DB4437', '#4285F4', '#F4B400', '#0F9D58', '#AB47BC', '#E91E63', '#9C27B0', '#673AB7', '#009688']
+        unique_file_paths = sorted({os.path.join(p['file_info']['path'], p['file_info']['filename']) for p in pages_to_export})
+        file_path_to_color = {path: file_colors[i % len(file_colors)] for i, path in enumerate(unique_file_paths)}
         
-        # --- MODIFICA INIZIO ---
-        # Assegna un colore univoco a ogni file basandosi sul suo percorso completo.
-        # Questo assicura che tutte le pagine dello stesso file abbiano lo stesso colore.
-        file_path_to_color = {}
-        color_index = 0
-        # Crea una lista ordinata di percorsi di file unici per garantire un'assegnazione colori consistente
-        unique_file_paths = sorted(list(set(os.path.join(p['file_info']['path'], p['file_info']['filename']) for p in pages_to_export)))
-        
-        for path in unique_file_paths:
-            file_path_to_color[path] = file_colors[color_index % len(file_colors)]
-            color_index += 1
-        # --- MODIFICA FINE ---
-        
-        css = """<style id="page-orientation-style"></style><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');:root{--list-thumbnail-size:80px;--grid-item-width:200px}body{font-family:'Roboto',sans-serif;margin:0;background-color:#f4f4f4}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:15px;margin-bottom:20px;background:#fff;padding:10px 15px;border-radius:8px;box-shadow:0 2px 4px #0000001a;position:sticky;top:10px;z-index:1000}#printable-content{margin:20px auto;padding:15mm;background:#fff;box-shadow:0 0 10px #0000001a;box-sizing:border-box}.controls button,.controls select{padding:8px 12px;font-size:14px;background-color:#e9e9e9;color:#333;border:1px solid #ccc;border-radius:5px;cursor:pointer;font-weight:700}#search-box{padding:8px;border:1px solid #ccc;border-radius:5px;width:200px}.print-button{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group{display:flex;align-items:center;gap:5px}.view-switcher button.active{background-color:#4285f4;color:#fff;border-color:#4285f4}.control-group button.size-btn{width:35px;height:35px;font-size:18px;line-height:1}.folder-container{margin-bottom:20px}.folder-header{background-color:#e0e0e0;padding:10px;border-left:5px solid #4285f4;overflow:hidden}.folder-path{font-weight:700;font-size:1.2em;float:left}.folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}.grid-container{display:flex;flex-wrap:wrap;justify-content:center;gap:15px;margin-top:15px}.grid-container .item{width:var(--grid-item-width);display:flex;flex-direction:column;border:1px solid #ddd;border-radius:5px;padding:10px;text-align:center;background-color:#fff;page-break-inside:avoid;position:relative;overflow:hidden}.grid-container .item-img{max-width:100%;height:auto;border-radius:3px;object-fit:contain}.grid-container .item-info{text-align:center;flex-grow:1}.list-container{display:flex;flex-direction:column;gap:8px;margin-top:15px}.list-container .item{display:flex;align-items:center;border:1px solid #ddd;border-radius:5px;padding:8px;background-color:#fff;page-break-inside:avoid;position:relative}.list-container .item-img{width:var(--list-thumbnail-size);height:var(--list-thumbnail-size);object-fit:contain;border-radius:3px;margin-right:15px;flex-shrink:0}.list-container .item-info{flex-grow:1;text-align:left}.filename{font-size:.9em;font-weight:700;margin-top:5px;word-wrap:break-word}.dimensions{font-size:.8em;color:#777}.page-indicator{position:absolute;top:5px;right:5px;font-size:.7em;color:#fff;padding:2px 5px;border-radius:3px}.annotation-area{width:100%;box-sizing:border-box;margin-top:8px;padding:5px;border:1px dashed #ccc;border-radius:4px;font-family:sans-serif;resize:vertical;min-height:40px;font-size:14px;font-weight:700;color:#d32f2f}.folder-annotation{margin:10px 0;min-height:50px}.list-container .annotation-area{margin-left:15px}@media print{html,body{width:100%;height:100%;margin:0;padding:0}.controls{display:none}body{background-color:#fff}#printable-content{width:100%;margin:0;padding:0;box-shadow:none}.folder-header{background-color:#f0f0f0!important;-webkit-print-color-adjust:exact}.page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact}.annotation-area{border:1px solid #eee;resize:none;background-color:#fdfdfd!important;-webkit-print-color-adjust:exact}.hide-on-print{display:none!important}}</style>"""
-        js_script = """<script>let state={view:"grid",gridItemWidth:200,listThumbSize:80};function switchView(e){if(state.view===e)return;state.view=e,document.querySelectorAll(".content-container").forEach(t=>{t.classList.remove("grid-container","list-container"),t.classList.add(e+"-container")}),document.getElementById("btn-grid").classList.toggle("active","grid"===e),document.getElementById("btn-list").classList.toggle("active","list"===e)}function changeSize(e){"grid"===state.view?(state.gridItemWidth=Math.max(80,Math.min(600,state.gridItemWidth+40*e)),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px")):(state.listThumbSize=Math.max(40,Math.min(200,state.listThumbSize+20*e)),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px"))}function updatePrintStyle(){let e=document.querySelector('input[name="orientation"]:checked').value;document.getElementById("page-orientation-style").innerHTML=`@page { size: A4 ${e}; margin: 1.5cm; }`;let t=document.getElementById("printable-content");t.style.width="portrait"===e?"180mm":"267mm"}function filterFiles(){let e=document.getElementById("search-box").value.toLowerCase();document.querySelectorAll(".folder-container").forEach(t=>{let i=t.querySelectorAll(".item"),l=0,n=0;i.forEach(t=>{let i=t.querySelector(".filename").textContent.toLowerCase();i.includes(e)?(t.style.display="flex",l++,n+=parseFloat(t.dataset.area)):t.style.display="none"});let a=t.querySelector(".folder-header"),s=t.querySelector(".folder-stats"),d=a.dataset.originalFiles,o=a.dataset.originalPages,r=a.dataset.originalSqm;""===e.trim()?s.textContent=`File: ${d} | Pagine: ${o} | Area: ${r} m²`:s.textContent=`File: ${l} (di ${d}) | Area: ${n.toFixed(2)} m²`,t.style.display=l>0?"":"none"})}function prepareAndPrint(){document.querySelectorAll(".annotation-area").forEach(e=>{e.classList.toggle("hide-on-print",""===e.value.trim())}),window.print()}document.addEventListener("DOMContentLoaded",()=>{switchView("grid"),updatePrintStyle(),document.documentElement.style.setProperty("--grid-item-width",state.gridItemWidth+"px"),document.documentElement.style.setProperty("--list-thumbnail-size",state.listThumbSize+"px")});</script>"""
-        body = """<body><div class="controls"><button onclick="prepareAndPrint()" class="print-button">Stampa Pagina</button><input type="text" id="search-box" onkeyup="filterFiles()" placeholder="Cerca per nome file..."><div class="control-group"><label>Orientamento:</label><input type="radio" id="portrait" name="orientation" value="portrait" checked onchange="updatePrintStyle()"><label for="portrait">Verticale</label><input type="radio" id="landscape" name="orientation" value="landscape" onchange="updatePrintStyle()"><label for="landscape">Orizzontale</label></div><div class="view-switcher control-group"><button id="btn-grid" onclick="switchView('grid')">Griglia</button><button id="btn-list" onclick="switchView('list')">Elenco</button></div><div class="size-controls control-group"><label>Dimensione:</label><button class="size-btn" onclick="changeSize(-1)">-</button><button class="size-btn" onclick="changeSize(1)">+</button></div></div><div id="printable-content">"""
-        
-        for folder, pages in sorted(grouped_pages.items()):
-            display_folder = self._get_display_path(pages[0]['file_info']).replace('\\', '/')
+        js_libraries = """
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        """
+
+        css = """<style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            :root { --a4-width: 21cm; --a4-height: 29.7cm; --item-width: 200px; }
+            body{font-family:'Roboto',sans-serif;margin:0;background-color:#d2d2d2; color:#333;}
+            .controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:#fff;padding:10px 20px;box-shadow:0 2px 4px #0000001a;position:sticky;top:0;z-index:1000}
+            .controls button, .controls input {padding:8px 12px;font-size:14px;border:1px solid #ccc;border-radius:5px;font-family:'Roboto',sans-serif;}
+            .controls button {background-color:#e9e9e9;color:#333;cursor:pointer;font-weight:700}
+            .print-button{background-color:#4285f4;color:#fff;border-color:#4285f4}
+            .control-group{display:flex;align-items:center;gap:5px;padding:5px;border:1px solid #e0e0e0;border-radius:5px}
+            #view-container { padding: 20px; }
+            .page {
+                background: white;
+                box-shadow: 0 0 10px rgba(0,0,0,0.2);
+                margin: 20px auto;
+                position: relative;
+                width: var(--a4-width);
+                height: var(--a4-height);
+            }
+            .page.landscape { width: var(--a4-height); height: var(--a4-width); }
+            .page-content { padding: 1cm; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; height: calc(100% - 2cm); width: calc(100% - 2cm); overflow: hidden; }
             
-            # Calcolo statistiche basato sulle pagine selezionate
-            num_files = len(set(p['file_info']['filename'] for p in pages))
+            .folder-header{background-color:#e0e0e0;padding:10px 15px;border-left:5px solid #4285f4;overflow:hidden;border-radius:0 5px 5px 0;width:100%;box-sizing:border-box;margin-bottom:5px;}
+            .folder-path{font-weight:700;font-size:1.2em;float:left}
+            .folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}
+            
+            /* Layout Specifics */
+            .page-content.page-layout .folder-header { flex-basis: 100%; }
+            .page-content.list-layout .folder-header { width: 100%; }
+            .page-content.grid-layout .folder-header { grid-column: 1 / -1; } /* Full span for grid */
+            
+            .page-content.grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--item-width), 1fr)); gap: 10px; align-content: start; }
+            .page-content.list-layout { display: flex; flex-direction: column; gap: 8px; flex-wrap: nowrap; }
+            .page-content.page-layout { display: flex; flex-wrap: wrap; gap: 5px; align-content: start; }
+            
+            .item {box-sizing: border-box; background-color:#fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: grab; display: flex; flex-direction: column; position: relative;}
+            .item.sortable-ghost {opacity: 0.4;}
+            .item-img-container { width: 100%; background-color: #fff; display: flex; align-items: center; justify-content: center; border-bottom:1px solid #ccc; }
+            .item-img{display:block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #000; box-sizing: border-box;}
+            .item-info{padding: 8px; font-size: 12px; text-align: left; background: #f8f9fa; width:100%; box-sizing: border-box;}
+            .item-info-header{display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;}
+            .filename{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;color:#212529; flex-grow: 1; padding-right: 5px;}
+            .metadata{font-size: 11px; color: #6c757d;}
+            .page-indicator{font-size:.8em;color:#fff;padding:2px 5px;border-radius:3px; text-shadow: 1px 1px 2px #000; flex-shrink: 0; font-weight: bold;}
+            .item-checkbox {position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; z-index: 10; cursor: pointer; background-color: rgba(255,255,255,0.7); border-radius: 3px;}
+            
+            /* Item Layouts */
+            .page-content.page-layout .item { width: var(--item-width); }
+            .page-content.grid-layout .item-img-container { height: calc(var(--item-width) * 0.75); }
+            .page-content.list-layout .item { flex-direction: row; align-items: center; width: 100%; }
+            .page-content.list-layout .item-img-container { width: calc(var(--item-width) / 2.5); height: calc(var(--item-width) / 2.5); border-right: 1px solid #ccc; border-bottom: none; }
+            .page-content.list-layout .item-info { flex-grow: 1; border: none; }
+            
+            .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px;}
+            #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
+            
+            @media print{
+                body{background-color:#fff !important; margin:0; padding:0;}
+                .controls, #loader, .item-checkbox {display:none !important;}
+                #view-container { padding: 0 !important; }
+                .page { margin: 0; box-shadow: none; page-break-after: always; }
+                .page:last-child { page-break-after: auto; }
+                .folder-header{background-color:#f0f0f0!important;-webkit-print-color-adjust:exact;}
+                .item.hide-for-print { display: none !important; }
+                .annotation-area:not(.show-on-print) {display: none !important;}
+                .item-info {background-color: #fff !important; border-color: #ddd !important; color: #000 !important; -webkit-print-color-adjust: exact;}
+                .annotation-area.show-on-print {display: block !important;}
+                .page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact}
+            }
+            </style>"""
+        js_script = """<script>
+            const state = {
+                view: 'page', // 'page', 'grid', 'list'
+                itemWidth: 200, 
+            };
+
+            function switchView(viewName) {
+                state.view = viewName;
+                document.querySelectorAll('.view-switch-btn').forEach(btn => btn.style.backgroundColor = '');
+                document.querySelector(`[onclick="switchView('${viewName}')"]`).style.backgroundColor = '#c0c0c0';
+                renderAllPages();
+            }
+
+            function renderAllPages() {
+                const viewContainer = document.getElementById('view-container');
+                viewContainer.innerHTML = ''; // Svuota
+                
+                const sourceData = document.getElementById('source-data');
+                const contentToLayout = sourceData.cloneNode(true);
+                const folders = Array.from(contentToLayout.querySelectorAll('.folder-container'));
+
+                if (folders.length === 0) return;
+
+                let currentPage = createNewPage();
+                viewContainer.appendChild(currentPage);
+                let contentWrapper = currentPage.querySelector('.page-content');
+                contentWrapper.className = `page-content ${state.view}-layout`;
+                const contentHeight = contentWrapper.clientHeight;
+                
+                for (const folder of folders) {
+                    if(folder.style.display === 'none') continue;
+                    
+                    const header = folder.querySelector('.folder-header');
+                    const items = Array.from(folder.querySelectorAll('.item'));
+
+                    contentWrapper.appendChild(header);
+                    if (contentWrapper.scrollHeight > contentHeight) {
+                        contentWrapper.removeChild(header);
+                        currentPage = createNewPage();
+                        viewContainer.appendChild(currentPage);
+                        contentWrapper = currentPage.querySelector('.page-content');
+                        contentWrapper.className = `page-content ${state.view}-layout`;
+                        contentWrapper.appendChild(header);
+                    }
+
+                    for (const item of items) {
+                        if(item.style.display === 'none') continue;
+                        
+                        contentWrapper.appendChild(item);
+                        if (contentWrapper.scrollHeight > contentHeight) {
+                            contentWrapper.removeChild(item);
+                            currentPage = createNewPage();
+                            viewContainer.appendChild(currentPage);
+                            contentWrapper = currentPage.querySelector('.page-content');
+                            contentWrapper.className = `page-content ${state.view}-layout`;
+                            contentWrapper.appendChild(item);
+                        }
+                    }
+                }
+                initDragAndDrop();
+            }
+            
+            function createNewPage() {
+                const page = document.createElement('div');
+                page.className = 'page';
+                page.innerHTML = '<div class="page-content"></div>';
+                return page;
+            }
+
+            function changeSize(amount) {
+                state.itemWidth = Math.max(100, Math.min(800, state.itemWidth + amount * 25));
+                document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
+                renderAllPages();
+            }
+
+            function filterFiles(){
+                const query = document.getElementById("search-box").value.toLowerCase();
+                document.querySelectorAll("#source-data .folder-container").forEach(folder => {
+                    let visibleItems = 0;
+                    folder.querySelectorAll(".item").forEach(item => {
+                        const filename = item.querySelector(".filename").textContent.toLowerCase();
+                        const isVisible = filename.includes(query);
+                        item.style.display = isVisible ? "flex" : "none";
+                        if(isVisible) visibleItems++;
+                    });
+                    folder.style.display = visibleItems > 0 ? "block" : "none";
+                });
+                renderAllPages();
+            }
+            
+            function initDragAndDrop() {
+                 document.querySelectorAll('.page-content').forEach(container => {
+                    if (container.sortableInstance) container.sortableInstance.destroy();
+                    container.sortableInstance = new Sortable(container, {
+                        group: 'shared-items',
+                        animation: 150,
+                        ghostClass: 'sortable-ghost',
+                        onEnd: (evt) => {
+                           const itemId = evt.item.id;
+                           const sourceItem = document.querySelector(`#source-data #${itemId}`);
+                           const nextSibling = evt.item.nextElementSibling;
+                           
+                           if(nextSibling) {
+                               const nextSourceSibling = document.querySelector(`#source-data #${nextSibling.id}`);
+                               if (nextSourceSibling) {
+                                   nextSourceSibling.parentNode.insertBefore(sourceItem, nextSourceSibling);
+                               }
+                           } else {
+                               const sourceParentContainer = document.querySelector(`#source-data #${evt.to.querySelector('.item').id}`).parentElement;
+                               if(sourceParentContainer) {
+                                    sourceParentContainer.appendChild(sourceItem);
+                               }
+                           }
+                           renderAllPages();
+                        }
+                    });
+                });
+            }
+
+            function toggleSelectAll(shouldBeChecked) {
+                document.querySelectorAll('.item-checkbox').forEach(cb => { cb.checked = shouldBeChecked; });
+            }
+
+            function prepareAndPrintStandard() {
+                document.querySelectorAll('#view-container .item').forEach(item => {
+                    const checkbox = item.querySelector('.item-checkbox');
+                    item.classList.toggle('hide-for-print', checkbox && !checkbox.checked);
+                });
+                document.querySelectorAll('#view-container .annotation-area').forEach(area => {
+                    const show = area.value.trim() !== '';
+                    area.classList.toggle('show-on-print', show);
+                });
+                window.print();
+            }
+            
+            async function createWysiwygPdf(outputAction = 'save') {
+                const { jsPDF } = window.jspdf;
+                const loader = document.getElementById('loader');
+                
+                let printWindow = null;
+                if (outputAction === 'print') {
+                    printWindow = window.open('', '_blank');
+                    if (!printWindow) { alert('Impossibile aprire la finestra di anteprima. Disabilitare il blocco pop-up e riprovare.'); return; }
+                    printWindow.document.write('<html><head><title>Stampa Fedele</title></head><body><p>Generazione PDF...</p></body></html>');
+                }
+                
+                loader.style.display = 'flex';
+                
+                try {
+                    const pdf = new jsPDF('p', 'mm', 'a4');
+                    const sourceElements = document.querySelectorAll('#view-container .page');
+                    let firstPage = true;
+
+                    for (const element of sourceElements) {
+                        const contentToPrint = element.cloneNode(true);
+                        
+                        contentToPrint.querySelectorAll('.item:not([style*="display: none"])').forEach(clonedItem => {
+                             const originalCheckbox = document.getElementById(clonedItem.id)?.querySelector('.item-checkbox');
+                             if (originalCheckbox && !originalCheckbox.checked) {
+                                 clonedItem.style.display = 'none';
+                             } else {
+                                clonedItem.querySelector('.item-checkbox')?.remove();
+                                const originalTextarea = document.getElementById(clonedItem.id)?.querySelector('.annotation-area');
+                                const clonedTextarea = clonedItem.querySelector('.annotation-area');
+                                if (originalTextarea && clonedTextarea) {
+                                    if(originalTextarea.value.trim() === '') clonedTextarea.remove();
+                                    else clonedTextarea.textContent = originalTextarea.value;
+                                }
+                             }
+                        });
+                        
+                        document.body.appendChild(contentToPrint);
+                        const canvas = await html2canvas(contentToPrint, { scale: 2.5 });
+                        document.body.removeChild(contentToPrint);
+                        
+                        const imgData = canvas.toDataURL('image/png');
+                        const imgProps = pdf.getImageProperties(imgData);
+                        const pdfWidth = pdf.internal.pageSize.getWidth();
+                        const pdfHeight = pdf.internal.pageSize.getHeight();
+                        const imgWidth = pdfWidth;
+                        const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+
+                        if (!firstPage) pdf.addPage();
+                        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+                        firstPage = false;
+                    }
+                    
+                    const pdfData = pdf.output('blob');
+                    const url = URL.createObjectURL(pdfData);
+
+                    if (outputAction === 'save') {
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = 'Anteprima-Miniature.pdf';
+                        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                    } else { 
+                        printWindow.location.href = url;
+                    }
+                } catch (e) {
+                    console.error("Errore generazione PDF:", e);
+                    alert("Si è verificato un errore durante la generazione del PDF.");
+                    if(printWindow) printWindow.close();
+                } finally {
+                    loader.style.display = 'none';
+                }
+            }
+
+            document.addEventListener("DOMContentLoaded", () => {
+                document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
+                let itemCounter = 0;
+                document.querySelectorAll('.item').forEach(item => item.id = `item-${itemCounter++}`);
+                switchView('page');
+            });
+        </script>"""
+        
+        # HTML: Crea una singola sorgente dati nascosta
+        source_html = ""
+        # Ordina per il percorso della cartella di scansione
+        sorted_grouped_pages = sorted(grouped_pages.items(), key=lambda item: item[0])
+
+        for folder_idx, (folder, pages) in enumerate(sorted_grouped_pages):
+            display_folder = os.path.basename(folder)
+            num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in pages})
             total_pages = len(pages)
             total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
             
-            body += f"""<div class="folder-container"><div class="folder-header" data-original-files="{num_files}" data-original-pages="{total_pages}" data-original-sqm="{total_sqm:.2f}"><span class="folder-stats">File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²</span><span class="folder-path">{display_folder}</span></div><textarea class="annotation-area folder-annotation" placeholder="Aggiungi un'annotazione per questa cartella..."></textarea><div class="content-container grid-container">"""
+            folder_id = f"folder-{folder_idx}"
+            source_html += f"""<div class="folder-container" data-folder-id="{folder_id}">
+                <div class="folder-header">
+                    <span class="folder-stats">File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²</span>
+                    <span class="folder-path">{html.escape(display_folder)}</span>
+                </div>
+                <div class="item-container">"""
             
-            # --- MODIFICA INIZIO ---
-            # Rimosso enumerate() perché l'indice della pagina non serve più per il colore.
             for page_data in pages:
-                item_data = page_data['file_info']
-                page_num = page_data['page_num']
+                item_data, page_num = page_data['file_info'], page_data['page_num']
                 full_path = os.path.join(item_data['path'], item_data['filename'])
-                page_count = item_data.get('page_count', 1)
+                page_details = item_data["pages_details"][page_num]
                 
-                # Recupera il colore pre-assegnato per il file corrente.
-                current_color = file_path_to_color.get(full_path, '#808080') # Grigio di default se non trovato
-                # --- MODIFICA FINE ---
-
                 try:
-                    page_details = item_data["pages_details"][page_num]
-                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
-
+                    img_data = b""
                     if item_data['type'] in ('PDF', 'AI'):
                         with fitz.open(full_path) as doc_pdf:
-                            page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
-                            img_data = pix.tobytes("png")
+                            img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=150).tobytes("png")
                     else:
                         with Image.open(full_path) as img:
-                            img.thumbnail((400, 400)); img_buffer = io.BytesIO()
+                            img.thumbnail((600, 600)); img_buffer = io.BytesIO()
                             img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
+                    
                     b64_img = base64.b64encode(img_data).decode('utf-8')
                     img_src = f"data:image/png;base64,{b64_img}"
                     
-                    dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
+                    page_count = item_data.get('page_count', 1)
+                    current_color = file_path_to_color.get(full_path, '#808080')
+                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
                     
-                    body += f'<div class="item" data-area="{area_sqm}">'
-                    if page_count > 1: body += f'<div class="page-indicator" style="background-color: {current_color}; --bg-color: {current_color};">Pag. {page_num + 1}/{page_count}</div>'
-                    
-                    body += f'''<img class="item-img" src="{img_src}" alt="Anteprima"><div class="item-info" style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;"><div class="filename">{html.escape(item_data["filename"])}</div><div class="dimensions">{html.escape(page_details["dimensions_cm"])} cm {html.escape(dpi_info)}</div></div><textarea class="annotation-area" placeholder="Annotazione..."></textarea></div>'''
-                except Exception as e: print(f"Impossibile creare anteprima HTML per {full_path}, pagina {page_num + 1}: {e}")
-            body += '</div></div>'
+                    source_html += f"""<div class="item" data-folder-id="{folder_id}">
+                        <input type="checkbox" class="item-checkbox" checked>
+                        <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima"></div>
+                        <div class="item-info">
+                            <div class="item-info-header">
+                                <span class="filename">{html.escape(item_data["filename"])}</span>
+                                {'<span class="page-indicator" style="background-color: %s;">Pag. %s/%s</span>' % (current_color, page_num + 1, page_count) if page_count > 1 else ''}
+                            </div>
+                            <div class="metadata"><span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm:.3f} m²</span></div>
+                        </div>
+                        <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
+                    </div>"""
+
+                except Exception as e: print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
+            source_html += '</div></div>'
+
+        body = f"""<body>
+            <div id="loader" style="display: none;"><span>Generazione PDF...</span></div>
+            <div class="controls">
+                <div class="control-group">
+                    <button class="view-switch-btn" onclick="switchView('page')">Pagina (WYSIWYG)</button>
+                    <button class="view-switch-btn" onclick="switchView('grid')">Griglia A4</button>
+                    <button class="view-switch-btn" onclick="switchView('list')">Elenco A4</button>
+                </div>
+                <div class="control-group">
+                    <button onclick="prepareAndPrintStandard()" title="Usa la stampa veloce del browser per la vista attiva.">Stampa Veloce</button>
+                    <button onclick="createWysiwygPdf('print')" class="print-button" title="Genera un PDF fedele della vista attiva e la invia alla stampante.">Stampa Fedele</button>
+                    <button onclick="createWysiwygPdf('save')" title="Genera e salva un PDF fedele della vista attiva.">Salva PDF Fedele</button>
+                </div>
+                <div class="control-group">
+                    <button onclick="toggleSelectAll(true)">Seleziona Tutti</button>
+                    <button onclick="toggleSelectAll(false)">Deseleziona Tutti</button>
+                </div>
+                <div class="control-group">
+                    <input type="text" id="search-box" onkeyup="filterFiles()" placeholder="Cerca per nome file...">
+                    <label>Dimensione:</label>
+                    <button onclick="changeSize(-1)" title="Rimpicciolisci">-</button>
+                    <button onclick="changeSize(1)" title="Ingrandisci">+</button>
+                </div>
+            </div>
+            <div id="view-container"></div>
+            <div id="source-data" style="display:none;">{source_html}</div>
+        </body>"""
         
-        body += '</div></body>'
-        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Anteprima Report</title>{css}{js_script}</head>{body}</html>"
+        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Anteprima Miniature</title>{js_libraries}{css}{js_script}</head>{body}</html>"
+
+
+    def copy_all_to_clipboard(self):
+        if not self.scan_results: return
+        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo"]
+        lines = ["\t".join(header)]
+        
+        grouped_results = defaultdict(list)
+        for item in self.scan_results:
+            grouped_results[item.get('scan_root', 'N/A')].append(item)
+
+        for folder, items in sorted(grouped_results.items()):
+            lines.append(f"\n--- {os.path.basename(folder)} ---")
+            for file_info in items:
+                rel_path = self._get_display_path(file_info)
+                page_count = file_info.get('page_count', 1)
+                
+                if page_count > 1:
+                    lines.append(f"{file_info['filename']}\tMulti-pagina\t{rel_path}")
+                    for i in range(page_count):
+                        page_details = file_info['pages_details'][i]
+                        lines.append(f"  Pagina {i+1}\t{page_details['dimensions_cm']}\t")
+                else:
+                    page_details = file_info['pages_details'][0]
+                    lines.append(f"{file_info['filename']}\t{page_details['dimensions_cm']}\t{rel_path}")
+
+        self.clipboard_clear(); self.clipboard_append("\n".join(lines))
+        self.status_text.set("Tabella raggruppata copiata negli appunti.")
+        
+    def copy_selection_to_clipboard(self):
+        selected_pages = self.get_pages_for_selection(selection_mode=True)
+        if not selected_pages: return
+        
+        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo"]
+        lines = ["\t".join(header)]
+        
+        grouped_pages = defaultdict(list)
+        for page_data in selected_pages:
+            grouped_pages[page_data['file_info'].get('scan_root', 'N/A')].append(page_data)
+
+        for folder, pages in sorted(grouped_pages.items()):
+            lines.append(f"\n--- {os.path.basename(folder)} ---")
+            for page_data in pages:
+                item, page_num = page_data['file_info'], page_data['page_num']
+                rel_path = self._get_display_path(item)
+                page_details = item["pages_details"][page_num]
+                page_count = item.get('page_count', 1)
+                
+                filename_display = f"{item['filename']} (Pag. {page_num + 1})" if page_count > 1 else item['filename']
+                lines.append(f"{filename_display}\t{page_details['dimensions_cm']}\t{rel_path}")
+
+        self.clipboard_clear(); self.clipboard_append("\n".join(lines))
+        self.status_text.set(f"Selezione raggruppata copiata ({len(selected_pages)} righe).")
+
+    def print_table(self, selection_mode=False):
+        pages_to_print = self.get_pages_for_selection(selection_mode)
+        if not pages_to_print: return messagebox.showinfo("Informazione", "Nessuna riga da stampare.", parent=self)
+        html_string = self._generate_html_table_with_totals(pages_to_print)
+        html_content = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Stampa Tabella</title><style>@media print{{@page{{margin:1.5cm}}body{{font-family:sans-serif;-webkit-print-color-adjust:exact}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid black;padding:5px;text-align:left}}th{{background-color:#e0e0e0!important}}tfoot{{background-color:#f0f0f0!important;font-weight:bold}}}}</style></head><body onload="window.print()">{html_string}</body></html>"""
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
+                f.write(html_content)
+            webbrowser.open(f'file://{os.path.realpath(f.name)}')
+            self.status_text.set("Apertura anteprima di stampa...")
+        except Exception as e:
+            traceback.print_exc(); self.status_text.set("Errore preparazione stampa.")
+            messagebox.showerror("Errore Stampa", f"Impossibile aprire l'anteprima.\n{e}", parent=self)
+
+    def export_to_csv(self, selection_mode=False):
+        pages_to_export = self.get_pages_for_selection(selection_mode)
+        if not pages_to_export: return messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
+        self._lock_ui()
+        file_path = filedialog.asksaveasfilename(parent=self, defaultextension=".csv", filetypes=[("File CSV", "*.csv")], title="Salva lista come CSV")
+        if not file_path: self._unlock_ui(); return self.status_text.set("Esportazione CSV annullata.")
+        self.status_text.set("Creazione CSV in corso..."); self.update_idletasks()
+        threading.Thread(target=self._build_csv_thread, args=(file_path, pages_to_export), daemon=True).start()
+
+    def _build_csv_thread(self, file_path, pages_to_export):
+        try:
+            # Ordina le pagine per cartella di origine per raggrupparle nell'output
+            pages_to_export.sort(key=lambda p: p['file_info'].get('scan_root', 'N/A'))
+            
+            with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f, delimiter=';')
+                writer.writerow(["Nome File", "Tipo", "Pagina", "Dimensioni (cm)", "Area (m²)", "Percorso Relativo", "Cartella Principale"])
+                
+                last_folder = None
+                for page_data in pages_to_export:
+                    item, page_num = page_data['file_info'], page_data['page_num']
+                    
+                    current_folder = item.get('scan_root', 'N/A')
+                    if current_folder != last_folder:
+                        # Aggiunge una riga vuota tra i gruppi di cartelle per leggibilità
+                        if last_folder is not None:
+                            writer.writerow([])
+                        last_folder = current_folder
+                        
+                    display_path = self._get_display_path(item)
+                    page_details = item['pages_details'][page_num]
+                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                    page_str = f"{page_num + 1} di {item.get('page_count', 1)}"
+                    writer.writerow([item['filename'], item['type'], page_str, page_details['dimensions_cm'], f"{area_sqm:.4f}", display_path, item.get('scan_root', '')])
+            
+            self.after(0, self.on_csv_success, file_path)
+        except Exception as e: self.after(0, self.on_csv_error, e)
+
+    def on_csv_success(self, file_path):
+        self.status_text.set("File CSV creato con successo.")
+        self._unlock_ui(); self.update()
+        messagebox.showinfo("Successo", f"Lista esportata con successo in:\n{file_path}", parent=self)
+        
+    def on_csv_error(self, e):
+        traceback.print_exc(); self.status_text.set("Errore creazione CSV.")
+        self._unlock_ui(); self.update()
+        messagebox.showerror("Errore", f"Impossibile creare il file CSV.\n{e}", parent=self)
 
     def _generate_html_table_with_totals(self, pages_to_export, include_headers_footers=True):
         if not pages_to_export: return ""
         total_area = 0
         html_string = '<table border="1" style="border-collapse: collapse; width: 100%; font-family: sans-serif;">'
-        
         if include_headers_footers:
             html_string += '<thead style="background-color: #e0e0e0;"><tr>'
-            headers = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso", "Area (m²)"]
-            for h in headers: html_string += f'<th style="padding: 5px; text-align: left;">{html.escape(h)}</th>'
+            for h in ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo", "Area (m²)"]:
+                html_string += f'<th style="padding: 5px; text-align: left;">{html.escape(h)}</th>'
             html_string += '</tr></thead>'
-
-        html_string += '<tbody>'
-        for page_data in pages_to_export:
-            html_string += '<tr>'
-            
-            file_info = page_data['file_info']
-            page_num = page_data['page_num']
-            page_details = file_info["pages_details"][page_num]
-            
-            page_count = file_info.get('page_count', 1)
-            filename_display = file_info['filename'] if page_count == 1 else f"   {file_info['filename']} (Pag. {page_num + 1})"
-            dimensions_display = page_details['dimensions_cm']
-            path_display = self._get_display_path(file_info).replace('\\', '/')
-
-            width_cm, height_cm = page_details.get('width_cm', 0), page_details.get('height_cm', 0)
-            area_sqm = (width_cm * height_cm) / 10000
-            total_area += area_sqm
-            
-            cell_style = 'padding: 5px; text-align: left;'
-            filename_style = 'padding: 5px; padding-left: 20px; text-align: left;' if page_count > 1 else cell_style
-
-            html_string += f'<td style="{filename_style}">{html.escape(filename_display)}</td>'
-            html_string += f'<td style="{cell_style}">{html.escape(dimensions_display)}</td>'
-            html_string += f'<td style="{cell_style}">{html.escape(path_display)}</td>'
-            html_string += f'<td style="{cell_style}">{area_sqm:.4f}</td></tr>'
-
-        html_string += '</tbody>'
         
+        html_string += '<tbody>'
+        
+        grouped_pages = defaultdict(list)
+        for page_data in pages_to_export:
+            grouped_pages[page_data['file_info'].get('scan_root', 'N/A')].append(page_data)
+
+        for folder, pages in sorted(grouped_pages.items()):
+            folder_html = f'<tr style="background-color: #f0f0f0; font-weight: bold;"><td colspan="4" style="padding: 5px; border-left: 3px solid #4285f4;">{html.escape(os.path.basename(folder))}</td></tr>'
+            html_string += folder_html
+            
+            for page_data in pages:
+                file_info, page_num = page_data['file_info'], page_data['page_num']
+                page_details = file_info["pages_details"][page_num]
+                page_count = file_info.get('page_count', 1)
+                filename_display = f"{file_info['filename']} (Pag. {page_num + 1})" if page_count > 1 else file_info['filename']
+                area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                total_area += area_sqm
+                path_display = self._get_display_path(file_info)
+                html_string += f'<tr><td style="padding:5px">{html.escape(filename_display)}</td><td style="padding:5px">{html.escape(page_details["dimensions_cm"])}</td><td style="padding:5px">{html.escape(path_display)}</td><td style="padding:5px">{area_sqm:.4f}</td></tr>'
+                
+        html_string += '</tbody>'
         if include_headers_footers:
             html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">Totale ({len(pages_to_export)} elementi)</td><td style="padding: 5px;">{total_area:.4f} m²</td></tr></tfoot>'
-            
         html_string += '</table>'
         return html_string
 
     def _set_clipboard_html(self, html_fragment: str):
-        if os.name != 'nt': raise NotImplementedError("La copia formattata è supportata solo su Windows.")
-        user32 = ctypes.WinDLL('user32'); kernel32 = ctypes.WinDLL('kernel32')
-        wintypes.HGLOBAL = wintypes.HANDLE
-        user32.OpenClipboard.argtypes = [wintypes.HWND]; user32.OpenClipboard.restype = wintypes.BOOL
-        user32.CloseClipboard.restype = wintypes.BOOL; user32.EmptyClipboard.restype = wintypes.BOOL
-        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HGLOBAL]; user32.SetClipboardData.restype = wintypes.HGLOBAL
-        user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]; user32.RegisterClipboardFormatW.restype = wintypes.UINT
-        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]; kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
-        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]; kernel32.GlobalLock.restype = wintypes.LPVOID
-        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]; kernel32.GlobalUnlock.restype = wintypes.BOOL
+        if os.name != 'nt':
+            raise NotImplementedError("La copia formattata è supportata solo su Windows.")
+
+        # Definizione delle funzioni WinAPI con tipi per robustezza
+        user32 = ctypes.WinDLL('user32')
+        kernel32 = ctypes.WinDLL('kernel32')
+
+        user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+        user32.RegisterClipboardFormatW.restype = wintypes.UINT
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.EmptyClipboard.restype = wintypes.BOOL
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.CloseClipboard.restype = wintypes.BOOL
+
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = wintypes.LPVOID
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.restype = wintypes.BOOL
         kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
-        GMEM_MOVEABLE = 0x0002
+        kernel32.GlobalFree.restype = wintypes.HGLOBAL
+
         CF_HTML = user32.RegisterClipboardFormatW("HTML Format")
-        header_template = "Version:0.9\r\nStartHTML:{{:0>9}}\r\nEndHTML:{{:0>9}}\r\nStartFragment:{{:0>9}}\r\nEndFragment:{{:0>9}}\r\n"
-        html_body_template = "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><!--StartFragment-->{}<!--EndFragment--></body></html>"
-        html_body = html_body_template.format(html_fragment)
-        header_placeholder_utf8 = header_template.format(0, 0, 0, 0).encode('utf-8')
+        if CF_HTML == 0:
+            raise OSError("Impossibile registrare il formato HTML per gli appunti.")
+
+        header = (
+            "Version:0.9\r\n"
+            "StartHTML:{:010d}\r\n"
+            "EndHTML:{:010d}\r\n"
+            "StartFragment:{:010d}\r\n"
+            "EndFragment:{:010d}\r\n"
+        )
+        html_body = f"<!DOCTYPE html><html><body><!--StartFragment-->{html_fragment}<!--EndFragment--></body></html>"
+        
+        header_utf8 = header.encode('utf-8')
         html_body_utf8 = html_body.encode('utf-8')
-        start_html = len(header_placeholder_utf8)
+
+        start_html = len(header_utf8)
         start_fragment = start_html + html_body.find("<!--StartFragment-->") + len("<!--StartFragment-->")
         end_fragment = start_html + html_body.find("<!--EndFragment-->")
         end_html = start_html + len(html_body_utf8)
-        final_header_utf8 = header_template.format(start_html, end_html, start_fragment, end_fragment).encode('utf-8')
-        clipboard_data = final_header_utf8 + html_body_utf8
-        h_global_mem = None
-        if not user32.OpenClipboard(None): raise ctypes.WinError()
+
+        final_header = header.format(start_html, end_html, start_fragment, end_fragment).encode('utf-8')
+        clipboard_data = final_header + html_body_utf8
+        
+        GMEM_MOVEABLE = 0x0002
+        h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(clipboard_data) + 1)
+        if not h_mem:
+            raise MemoryError("GlobalAlloc ha fallito.")
+
+        p_mem = kernel32.GlobalLock(h_mem)
+        if not p_mem:
+            kernel32.GlobalFree(h_mem)
+            raise MemoryError("GlobalLock ha fallito.")
+
+        try:
+            ctypes.memmove(p_mem, clipboard_data, len(clipboard_data))
+        finally:
+            kernel32.GlobalUnlock(h_mem)
+
+        if not user32.OpenClipboard(self.winfo_id()):
+            kernel32.GlobalFree(h_mem)
+            raise OSError("Impossibile aprire gli appunti.")
+
         try:
             user32.EmptyClipboard()
-            h_global_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(clipboard_data) + 1)
-            if not h_global_mem: raise ctypes.WinError()
-            p_global_mem = kernel32.GlobalLock(h_global_mem)
-            if not p_global_mem: raise ctypes.WinError()
-            try: ctypes.memmove(p_global_mem, clipboard_data, len(clipboard_data))
-            finally: kernel32.GlobalUnlock(h_global_mem)
-            if not user32.SetClipboardData(CF_HTML, h_global_mem): raise ctypes.WinError()
-            h_global_mem = None
+            if not user32.SetClipboardData(CF_HTML, h_mem):
+                kernel32.GlobalFree(h_mem) # Se SetClipboardData fallisce, dobbiamo liberare la memoria
+                raise OSError("Impossibile impostare i dati negli appunti.")
         finally:
             user32.CloseClipboard()
-            if h_global_mem: kernel32.GlobalFree(h_global_mem)
 
     def copy_formatted_to_clipboard(self, selection_mode=False):
         pages_to_copy = self.get_pages_for_selection(selection_mode)
-        if not pages_to_copy:
-            self.status_text.set("Nessuna riga da copiare."); return
-            
-        html_table = self._generate_html_table_with_totals(pages_to_copy, include_headers_footers=True)
-        if not html_table: return
+        if not pages_to_copy: return self.status_text.set("Nessuna riga da copiare.")
+        if not (html_table := self._generate_html_table_with_totals(pages_to_copy)): return
         try:
             self._set_clipboard_html(html_table)
-            self.status_text.set(f"Tabella formattata ({len(pages_to_copy)} righe) copiata negli appunti.")
+            self.status_text.set(f"Tabella formattata ({len(pages_to_copy)} righe) copiata.")
         except Exception as e:
-            self.status_text.set("Errore: Impossibile copiare la tabella formattata.")
-            messagebox.showerror("Errore Appunti", f"Non è stato possibile copiare l'HTML negli appunti.\nDettagli: {e}", parent=self)
+            self.status_text.set("Errore: impossibile copiare la tabella.")
+            messagebox.showerror("Errore Appunti", f"Impossibile copiare l'HTML.\n{e}", parent=self)
             traceback.print_exc()
 
     def export_to_pdf(self, selection_mode=False):
         pages_to_export = self.get_pages_for_selection(selection_mode)
-        if not pages_to_export:
-            messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self); return
-
+        if not pages_to_export: return messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
         self._lock_ui()
         options_dialog = ExportOptionsWindow(self)
         self.wait_window(options_dialog)
-        options = options_dialog.result
-        
-        if not options:
-            self.status_text.set("Esportazione annullata.")
-            self._unlock_ui()
-            return
-
+        if not (options := options_dialog.result): self._unlock_ui(); return self.status_text.set("Esportazione annullata.")
         file_path = filedialog.asksaveasfilename(parent=self, defaultextension=".pdf", filetypes=[("File PDF", "*.pdf")], title="Salva report PDF")
-        if not file_path:
-            self.status_text.set("Esportazione PDF annullata.")
-            self._unlock_ui()
-            return
-
-        self.status_text.set("Creazione del report PDF in corso...")
-        self.update_idletasks()
-
-        thread = threading.Thread(target=self._build_pdf_thread, args=(file_path, options, pages_to_export), daemon=True)
-        thread.start()
+        if not file_path: self._unlock_ui(); return self.status_text.set("Esportazione PDF annullata.")
+        self.status_text.set("Creazione PDF in corso..."); self.update_idletasks()
+        threading.Thread(target=self._build_pdf_thread, args=(file_path, options, pages_to_export), daemon=True).start()
 
     def _build_pdf_thread(self, file_path, options, pages_to_export):
         try:
             grouped_pages = defaultdict(list)
-            for page in pages_to_export:
-                grouped_pages[page['file_info']['scan_root']].append(page)
-            
+            for page in pages_to_export: grouped_pages[page['file_info']['scan_root']].append(page)
             page_size = landscape(A4) if options['orientation'] == 'landscape' else A4
             doc = SimpleDocTemplate(file_path, pagesize=page_size, topMargin=1.5*cm, bottomMargin=1.5*cm, leftMargin=1.5*cm, rightMargin=1.5*cm)
-            
             styles = getSampleStyleSheet()
             filename_style = ParagraphStyle('file_style', parent=styles['Normal'], fontSize=8, alignment=1)
             dims_style = ParagraphStyle('dims_style', parent=styles['Normal'], fontSize=7, textColor=colors.darkgrey, alignment=1)
             folder_header_style = ParagraphStyle('folder_header', parent=styles['h2'], backColor=colors.lightblue, padding=4, textColor=colors.black)
-            
-            story = []
-            num_columns = options['columns']
+            story, num_columns = [], options['columns']
             col_width = (doc.width / num_columns) - (cm * 0.2 * (num_columns - 1))
+            sorted_grouped_pages = sorted(grouped_pages.items(), key=lambda item: item[0])
 
-            for folder, pages in sorted(grouped_pages.items()):
-                display_folder = self._get_display_path(pages[0]['file_info']).replace('\\', '/')
-                num_files = len(set(p['file_info']['filename'] for p in pages))
-                total_pages = len(pages)
-                total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
-                
-                stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
-                story.append(Paragraph(display_folder, folder_header_style))
-                story.append(Paragraph(stats_text, styles['Normal']))
-                story.append(Spacer(1, 0.5*cm))
-
-                grid_data = []; row = []
+            for folder, pages in sorted_grouped_pages:
+                display_folder = os.path.basename(folder)
+                num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in pages})
+                total_pages, total_sqm = len(pages), sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
+                story.extend([Paragraph(display_folder, folder_header_style), Paragraph(f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²", styles['Normal']), Spacer(1, 0.5*cm)])
+                grid_data, row = [], []
                 for page_data in pages:
-                    item_data = page_data['file_info']
-                    page_num = page_data['page_num']
+                    item_data, page_num = page_data['file_info'], page_data['page_num']
                     full_path = os.path.join(item_data['path'], item_data['filename'])
-                    page_count = item_data.get('page_count', 1)
-                    
                     cell_content = []
                     try:
                         if item_data['type'] in ('PDF', 'AI'):
                             with fitz.open(full_path) as doc_pdf:
-                                page = doc_pdf.load_page(page_num); pix = page.get_pixmap(dpi=150)
-                                img_data = pix.tobytes("png"); img_report = ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional')
+                                img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=150).tobytes("png")
+                                img_report = ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional')
                         else:
                             with Image.open(full_path) as img:
                                 img.thumbnail((400, 400)); img_buffer = io.BytesIO()
                                 img.save(img_buffer, format='PNG'); img_buffer.seek(0)
                                 img_report = ReportLabImage(img_buffer, width=col_width*0.9, height=col_width*0.9, kind='proportional')
                         cell_content.append(img_report)
-                    except Exception as e: print(f"Impossibile creare anteprima PDF per {full_path}: {e}")
-                    
-                    page_info = f" (Pag. {page_num + 1}/{page_count})" if page_count > 1 else ""
+                    except Exception as e: print(f"Errore anteprima PDF per {full_path}: {e}")
+                    page_info = f" (Pag. {page_num + 1}/{item_data.get('page_count', 1)})" if item_data.get('page_count', 1) > 1 else ""
                     cell_content.append(Paragraph(item_data['filename'] + page_info, filename_style))
-                    
                     dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
-                    dims_text = item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}"
-                    cell_content.append(Paragraph(dims_text, dims_style))
-                    
+                    cell_content.append(Paragraph(item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}", dims_style))
                     row.append(cell_content)
                     if len(row) == num_columns: grid_data.append(row); row = []
-                if row:
-                    row.extend([""] * (num_columns - len(row)))
-                    grid_data.append(row)
-                
+                if row: row.extend([""] * (num_columns - len(row))); grid_data.append(row)
                 if grid_data:
-                    grid_table = Table(grid_data, colWidths=[col_width] * num_columns)
-                    grid_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('BOX', (0,0), (-1,-1), 1, colors.lightgrey), ('PADDING', (0,0), (-1,-1), 6)]))
-                    story.append(grid_table)
+                    story.append(Table(grid_data, colWidths=[col_width]*num_columns, style=[('VALIGN',(0,0),(-1,-1),'TOP'), ('ALIGN',(0,0),(-1,-1),'CENTER'), ('BOX',(0,0),(-1,-1),1,colors.lightgrey), ('PADDING',(0,0),(-1,-1),6)]))
                 story.append(PageBreak())
-            
             if story and isinstance(story[-1], PageBreak): story.pop()
-            
             doc.build(story)
             self.after(0, self.on_pdf_success, file_path)
-        except Exception as e:
-            self.after(0, self.on_pdf_error, e)
+        except Exception as e: self.after(0, self.on_pdf_error, e)
 
     def on_pdf_success(self, file_path):
         self.status_text.set("Report PDF creato con successo.")
-        self._unlock_ui()
-        self.update()
+        self._unlock_ui(); self.update()
         messagebox.showinfo("Successo", f"Report esportato con successo in:\n{file_path}", parent=self)
 
     def on_pdf_error(self, e):
-        traceback.print_exc()
-        self.status_text.set("Errore durante la creazione del PDF.")
-        self._unlock_ui()
-        self.update()
-        messagebox.showerror("Errore", f"Impossibile creare il PDF.\nErrore: {e}", parent=self)
+        traceback.print_exc(); self.status_text.set("Errore creazione PDF.")
+        self._unlock_ui(); self.update()
+        messagebox.showerror("Errore", f"Impossibile creare il PDF.\n{e}", parent=self)
 
-# --- Funzione di caricamento richiesta da winfile.py ---
 def create_tab(tab_view):
-    """
-    Crea la scheda "Liste e anteprime", inizializza l'app e restituisce
-    il nome della scheda e l'istanza dell'app per la gestione eventi.
-    """
     tab_name = "Liste e anteprime"
     tab = tab_view.add(tab_name)
-    
     app_instance = FileScannerApp(master=tab)
-    
-    # Restituisce il nome della scheda e l'istanza dell'app
     return tab_name, app_instance
+
+

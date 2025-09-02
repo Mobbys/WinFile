@@ -7,7 +7,7 @@
 ; ##################################################################
 
 !define NOME_PRODOTTO "WinFile"
-!define VERSIONE "3.4"
+!define VERSIONE "3.5"
 !define NOME_FILE_EXE "WinFile.exe"
 !define CARTELLA_SORGENTE "build\WinFile ${VERSIONE}" ; Cartella con i file da installare
 !define FILE_ICONA "icona.ico"

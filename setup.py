@@ -3,7 +3,7 @@ from cx_Freeze import setup, Executable
 
 # --- Dati dell'applicazione ---
 APP_NAME = "WinFile"
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 
 # --- Opzioni di Base ---
 # Queste sono le librerie che il tuo programma usa.
