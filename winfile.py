@@ -13,6 +13,9 @@ import threading
 import requests
 import webbrowser
 from packaging import version
+import tempfile # Aggiunto per la cartella temporanea
+import subprocess # Aggiunto per avviare l'installer
+import sys # Aggiunto per ottenere il percorso dell'eseguibile
 
 # --- CONFIGURAZIONE AGGIORNAMENTI ---
 GITHUB_REPO = "Mobbys/WinFile" 
@@ -75,7 +78,6 @@ class WinFileApp(ctk.CTkFrame):
         title_label = ctk.CTkLabel(top_bar, text="WinFile", font=ctk.CTkFont(size=16, weight="bold"))
         title_label.pack(side="left", padx=10)
 
-        # Crea il pulsante delle impostazioni usando l'emoji, come richiesto.
         settings_button = ctk.CTkButton(top_bar, text="⚙️", font=ctk.CTkFont(size=20), width=32, height=32, command=self.open_settings_window)
         settings_button.pack(side="right", padx=10)
 
@@ -93,60 +95,172 @@ class WinFileApp(ctk.CTkFrame):
     def check_for_updates(self):
         """Contatta l'API di GitHub per verificare la presenza di una nuova release."""
         try:
-            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
-            
-            # Per i repository pubblici non è necessaria alcuna autenticazione
-            response = requests.get(api_url, timeout=5)
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            response = requests.get(api_url, timeout=10)
             response.raise_for_status()
             
-            all_releases = response.json()
-            if not all_releases: return
+            latest_release = response.json()
+            if not latest_release or latest_release.get('draft') or latest_release.get('prerelease'):
+                return
 
-            latest_stable_release = next((r for r in all_releases if not r['draft'] and not r['prerelease']), None)
-            
-            if not latest_stable_release: return
-
-            latest_version_str = latest_stable_release['tag_name'].lstrip('v')
+            latest_version_str = latest_release['tag_name'].lstrip('v')
             
             if version.parse(latest_version_str) > version.parse(CURRENT_VERSION):
-                self.master.after(0, self.show_update_dialog, latest_stable_release)
+                self.master.after(0, self.start_silent_download, latest_release)
 
         except requests.exceptions.RequestException as e:
             print(f"Errore di rete durante il controllo degli aggiornamenti: {e}")
         except Exception as e:
             print(f"Errore generico durante il controllo degli aggiornamenti: {e}")
 
-    def show_update_dialog(self, release_info):
-        """Mostra la finestra di dialogo per informare l'utente dell'aggiornamento."""
-        latest_version_tag = release_info['tag_name']
-        release_notes = release_info.get('body', 'Nessuna nota di rilascio disponibile.')
+    def start_silent_download(self, release_info):
+        """Avvia il download dell'aggiornamento in un thread separato."""
         assets = release_info.get('assets', [])
         
-        # Impostazioni di fallback
-        download_url = release_info['html_url'] 
-        message_action = "andare alla pagina di download"
+        download_url = None
+        # NUOVA LOGICA: Diamo priorità al file .zip per l'aggiornamento automatico
+        for asset in assets:
+            if asset['name'].endswith('.zip'):
+                download_url = asset['browser_download_url']
+                break
+        # Se non c'è lo zip, cerchiamo un installer come fallback
+        if not download_url:
+            for asset in assets:
+                 if asset['name'].endswith(('.exe', '.msi')):
+                    download_url = asset['browser_download_url']
+                    break
 
-        # *** NUOVA LOGICA DI CONTROLLO ***
-        # 1. Cerca prima l'asset .exe
-        exe_asset_url = next((asset['browser_download_url'] for asset in assets if asset['name'].endswith('.exe')), None)
+        if download_url:
+            print(f"Nuova versione trovata. Avvio download da: {download_url}")
+            download_thread = threading.Thread(target=self.download_and_install, args=(download_url, release_info), daemon=True)
+            download_thread.start()
+        else:
+            print("Aggiornamento trovato, ma nessun file .zip, .exe o .msi disponibile per il download.")
+
+    def download_and_install(self, url, release_info):
+        """
+        Scarica il file di aggiornamento in una cartella temporanea 
+        e poi chiede all'utente di installarlo.
+        """
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+
+            filename = url.split('/')[-1]
+            temp_dir = tempfile.gettempdir()
+            installer_path = os.path.join(temp_dir, filename)
+
+            with open(installer_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            print(f"Download completato: {installer_path}")
+
+            self.master.after(0, self.prompt_to_install, installer_path, release_info)
+
+        except requests.exceptions.RequestException as e:
+            print(f"Errore durante il download dell'aggiornamento: {e}")
+        except Exception as e:
+            print(f"Errore imprevisto durante il processo di aggiornamento: {e}")
+
+    def prompt_to_install(self, installer_path, release_info):
+        """
+        Mostra un popup per informare che l'aggiornamento è pronto
+        e chiede se si vuole procedere con l'installazione.
+        """
+        notes = "Nessuna nota di rilascio disponibile."
+        if release_info and 'body' in release_info and release_info['body']:
+            notes = release_info['body']
+
+        message = (f"Un nuovo aggiornamento è stato scaricato ed è pronto per l'installazione!\n\n"
+                   f"Novità:\n{notes}\n\n"
+                   f"Vuoi chiudere l'applicazione e installarlo ora?")
         
-        # 2. Se non trova .exe, cerca l'asset .zip
-        zip_asset_url = next((asset['browser_download_url'] for asset in assets if asset['name'].endswith('.zip')), None)
+        if messagebox.askyesno("Aggiornamento Pronto", message, parent=self):
+            # NUOVA LOGICA: Controlla se è un aggiornamento portable (.zip) o un installer
+            if installer_path.endswith('.zip'):
+                self._launch_portable_updater(installer_path)
+            else:
+                try:
+                    # Comportamento precedente per gli installer (.exe, .msi)
+                    os.startfile(installer_path)
+                    print("Avvio dell'installer e chiusura dell'applicazione...")
+                    self.master.destroy()
+                except Exception as e:
+                    messagebox.showerror("Errore", f"Impossibile avviare l'installer.\n\nPercorso: {installer_path}\nErrore: {e}", parent=self)
 
-        if exe_asset_url:
-            download_url = exe_asset_url
-            message_action = "scaricare direttamente il nuovo installer (.exe)"
-        elif zip_asset_url:
-            download_url = zip_asset_url
-            message_action = "scaricare direttamente l'archivio di aggiornamento (.zip)"
-        # Altrimenti, usa il fallback già impostato
+    def _launch_portable_updater(self, zip_path):
+        """
+        Crea ed esegue uno script batch (.bat) di aggiornamento per gestire la
+        sostituzione dei file della versione portable, senza richiedere Python.
+        """
+        try:
+            app_path = sys.executable
+            app_dir = os.path.dirname(app_path)
+            
+            if getattr(sys, 'frozen', False):
+                restart_command = f'"{app_path}"'
+            else:
+                main_script_path = os.path.abspath(sys.argv[0])
+                restart_command = f'"{app_path}" "{main_script_path}"'
 
-        message = (f"È disponibile una nuova versione: {latest_version_tag}!\n\n"
-                   f"Note di Rilascio:\n\n{release_notes}\n\n"
-                   f"Vuoi {message_action}?")
-        
-        if messagebox.askyesno("Aggiornamento Disponibile", message, parent=self):
-            webbrowser.open(download_url)
+            # --- CORREZIONE ---
+            # Crea uno script PowerShell robusto che gestisce gli zip con e senza cartella radice
+            # e sovrascrive correttamente i file esistenti usando Copy-Item.
+            powershell_script = f"""
+                $tempExtractPath = Join-Path -Path '{app_dir}' -ChildPath '_update_temp'
+                if (Test-Path $tempExtractPath) {{ Remove-Item -Path $tempExtractPath -Recurse -Force }}
+                New-Item -Path $tempExtractPath -ItemType Directory -Force | Out-Null
+                
+                Expand-Archive -Path '{zip_path}' -DestinationPath $tempExtractPath -Force
+                
+                $sourceFolder = $tempExtractPath
+                $extractedItems = Get-ChildItem -Path $tempExtractPath
+                if (($extractedItems.Count -eq 1) -and ($extractedItems[0].PSIsContainer)) {{
+                    $sourceFolder = $extractedItems[0].FullName
+                }}
+                
+                Copy-Item -Path ($sourceFolder + "\\*") -Destination '{app_dir}' -Recurse -Force
+                
+                Remove-Item -Path $tempExtractPath -Recurse -Force
+            """
+            
+            # Codifica lo script in Base64 per passarlo a PowerShell in modo sicuro
+            encoded_ps_script = base64.b64encode(powershell_script.encode('utf_16_le')).decode('utf-8')
+
+            updater_script_code = f"""@echo off
+title WinFile Updater
+chcp 65001 > nul
+
+set "ZIP_PATH={zip_path}"
+
+rem Attende 4 secondi per permettere all'app principale di chiudersi
+timeout /t 4 /nobreak > nul
+
+rem Usa PowerShell per estrarre l'archivio in modo intelligente, gestendo la cartella radice
+powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded_ps_script}
+
+rem Pulisce il file zip scaricato
+del "%ZIP_PATH%" > nul
+
+rem Riavvia l'applicazione aggiornata
+start "" {restart_command}
+
+rem Il comando finale elimina lo script batch stesso
+(goto) 2>nul & del "%~f0"
+"""
+            temp_dir = tempfile.gettempdir()
+            updater_script_path = os.path.join(temp_dir, 'winfile_updater.bat')
+            with open(updater_script_path, 'w', encoding='utf-8') as f:
+                f.write(updater_script_code)
+
+            subprocess.Popen([updater_script_path], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+            
+            print("Avvio dello script di aggiornamento e chiusura dell'app principale...")
+            self.master.destroy()
+
+        except Exception as e:
+            messagebox.showerror("Errore di Aggiornamento", f"Impossibile avviare il processo di aggiornamento automatico.\\n\\nErrore: {e}", parent=self)
 
     def open_settings_window(self):
         if self.settings_win is None or not self.settings_win.winfo_exists():
@@ -213,14 +327,14 @@ if __name__ == "__main__":
         "apps": [
             {"module": "app_liste_anteprime"}, 
             {"module": "app_controllo_immagini"},
-            {"module": "app_controllo_pdf"} # <-- NUOVA APP AGGIUNTA QUI
+            {"module": "app_controllo_pdf"}
         ]
     }
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
             config = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        pass # Ignora l'errore se il file non esiste, useremo il default
+        pass
 
     theme_conf = config.get('theme', {})
     ctk.set_appearance_mode(theme_conf.get('appearance_mode', 'System')) 
@@ -240,3 +354,4 @@ if __name__ == "__main__":
     root.dnd_bind('<<Drop>>', handle_global_drop)
 
     root.mainloop()
+
