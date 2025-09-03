@@ -1,4 +1,4 @@
-# apps/app_controllo_pdf.py - v14.3
+# apps/app_controllo_pdf.py - v16.4 (Semplificazione UI Ridimensionamento)
 import customtkinter as ctk
 import os
 import fitz  # PyMuPDF
@@ -16,6 +16,15 @@ except ImportError:
 
 # Disabilita il limite di dimensione per le immagini grandi
 Image.MAX_IMAGE_PIXELS = None
+
+# Dizionario con formati pagina standard in punti (1 punto = 1/72 di pollice)
+PAGE_FORMATS_PT = {
+    "A3 (29.7x42.0 cm)": (842, 1191),
+    "A4 (21.0x29.7 cm)": (595, 842),
+    "A5 (14.8x21.0 cm)": (420, 595),
+}
+MM_TO_PT = 2.83465
+CM_TO_PT = 28.3465
 
 class PageSelectionDialog(ctk.CTkToplevel):
     """
@@ -179,6 +188,124 @@ class AddMarginsDialog(ctk.CTkToplevel):
         except ValueError:
             messagebox.showerror("Valore non valido", "Inserisci un valore numerico per i margini.", parent=self)
 
+class ResizePageDialog(ctk.CTkToplevel):
+    """Dialogo per ridimensionare le pagine a una dimensione specifica."""
+    def __init__(self, master, current_page=None):
+        super().__init__(master)
+        self.result = None
+        self.title("Ridimensiona Pagine")
+        self.geometry("450x330")
+        self.transient(master)
+        self.grab_set()
+
+        self.current_page = current_page
+        self.aspect_ratio = None
+        self._is_updating_dims = False
+
+        if self.current_page:
+            page_rect = self.current_page.rect
+            page_width_pt = page_rect.width
+            page_height_pt = page_rect.height
+            if page_width_pt > 0 and page_height_pt > 0:
+                self.aspect_ratio = page_width_pt / page_height_pt
+            initial_width_cm = f"{page_width_pt / CM_TO_PT:.2f}"
+            initial_height_cm = f"{page_height_pt / CM_TO_PT:.2f}"
+        else:
+            a4_w_pt, a4_h_pt = PAGE_FORMATS_PT["A4 (21.0x29.7 cm)"]
+            initial_width_cm = f"{a4_w_pt / CM_TO_PT:.2f}"
+            initial_height_cm = f"{a4_h_pt / CM_TO_PT:.2f}"
+
+        self.grid_columnconfigure(1, weight=1)
+
+        # Dimensioni Personalizzate
+        size_frame = ctk.CTkFrame(self, fg_color="transparent")
+        size_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        size_frame.grid_columnconfigure((1, 3), weight=1)
+
+        self.width_var = ctk.StringVar(value=initial_width_cm)
+        self.height_var = ctk.StringVar(value=initial_height_cm)
+
+        ctk.CTkLabel(size_frame, text="Larghezza (cm):").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.width_entry = ctk.CTkEntry(size_frame, textvariable=self.width_var)
+        self.width_entry.grid(row=0, column=1, sticky="ew")
+        
+        ctk.CTkLabel(size_frame, text="Altezza (cm):").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
+        self.height_entry = ctk.CTkEntry(size_frame, textvariable=self.height_var)
+        self.height_entry.grid(row=0, column=3, sticky="ew")
+
+        # Mantieni Proporzioni
+        self.aspect_ratio_var = ctk.BooleanVar(value=True)
+        self.aspect_ratio_checkbox = ctk.CTkCheckBox(self, text="Mantieni proporzioni", variable=self.aspect_ratio_var)
+        self.aspect_ratio_checkbox.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        
+        if self.aspect_ratio is None:
+            self.aspect_ratio_checkbox.configure(state="disabled")
+            self.aspect_ratio_var.set(False)
+
+        # Ambito di applicazione
+        scope_label = ctk.CTkLabel(self, text="Applica a:")
+        scope_label.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        self.scope_var = ctk.StringVar(value="current")
+        
+        radio_frame = ctk.CTkFrame(self, fg_color="transparent")
+        radio_frame.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        
+        ctk.CTkRadioButton(radio_frame, text="Pagina Corrente", variable=self.scope_var, value="current").pack(anchor="w")
+        ctk.CTkRadioButton(radio_frame, text="Tutte le Pagine", variable=self.scope_var, value="all").pack(anchor="w")
+        ctk.CTkRadioButton(radio_frame, text="Pagine Selezionate", variable=self.scope_var, value="selected").pack(anchor="w")
+
+        # Pulsanti di conferma
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.grid(row=3, column=0, columnspan=2, pady=20)
+        
+        apply_btn = ctk.CTkButton(button_frame, text="Applica", command=self.apply, fg_color="green")
+        apply_btn.pack(side="left", padx=10)
+        
+        cancel_btn = ctk.CTkButton(button_frame, text="Annulla", command=self.destroy, fg_color="gray")
+        cancel_btn.pack(side="left", padx=10)
+        
+        self.width_var.trace_add("write", self._update_height_from_width)
+        self.height_var.trace_add("write", self._update_width_from_height)
+
+    def _update_height_from_width(self, *args):
+        if self._is_updating_dims or not self.aspect_ratio_var.get() or self.aspect_ratio is None:
+            return
+        
+        self._is_updating_dims = True
+        try:
+            width_cm = float(self.width_var.get())
+            new_height = width_cm / self.aspect_ratio
+            self.height_var.set(f"{new_height:.2f}")
+        except (ValueError, ZeroDivisionError):
+            pass
+        finally:
+            self._is_updating_dims = False
+            
+    def _update_width_from_height(self, *args):
+        if self._is_updating_dims or not self.aspect_ratio_var.get() or self.aspect_ratio is None:
+            return
+            
+        self._is_updating_dims = True
+        try:
+            height_cm = float(self.height_var.get())
+            new_width = height_cm * self.aspect_ratio
+            self.width_var.set(f"{new_width:.2f}")
+        except (ValueError, ZeroDivisionError):
+            pass
+        finally:
+            self._is_updating_dims = False
+
+    def apply(self):
+        try:
+            self.result = {
+                "width_cm": float(self.width_var.get()),
+                "height_cm": float(self.height_var.get()),
+                "keep_aspect_ratio": self.aspect_ratio_var.get(),
+                "scope": self.scope_var.get()
+            }
+            self.destroy()
+        except ValueError:
+            messagebox.showerror("Valore non valido", "Inserisci valori numerici per larghezza e altezza.", parent=self)
 
 class DragDropChoiceDialog(ctk.CTkToplevel):
     """
@@ -234,7 +361,7 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.pan_start_y = 0
 
         # --- Layout a 3 colonne ---
-        self.grid_columnconfigure(0, weight=0, minsize=200)
+        self.grid_columnconfigure(0, weight=0, minsize=250) 
         self.grid_columnconfigure(1, weight=1, minsize=350)
         self.grid_columnconfigure(2, weight=0, minsize=620) 
         self.grid_rowconfigure(0, weight=1)
@@ -296,6 +423,9 @@ class PDFCheckerApp(ctk.CTkFrame):
 
         self.add_margins_button = ctk.CTkButton(actions_frame, text="Aggiungi Margini...", command=self.open_add_margins_dialog, state="disabled")
         self.add_margins_button.pack(pady=5, fill="x")
+        
+        self.resize_button = ctk.CTkButton(actions_frame, text="Ridimensiona Pagine...", command=self.open_resize_dialog, state="disabled")
+        self.resize_button.pack(pady=5, fill="x")
         
         self.save_button = ctk.CTkButton(actions_frame, text="Salva PDF Modificato...", command=self.save_modified_pdf, state="disabled", fg_color="green", hover_color="darkgreen")
         self.save_button.pack(pady=(15, 5), fill="x")
@@ -414,28 +544,60 @@ class PDFCheckerApp(ctk.CTkFrame):
         current_doc = self.modified_doc if self.modified_doc else self.doc
         if not current_doc: return
 
-        for page_num in range(len(current_doc)):
-            thumb_frame = ctk.CTkFrame(self.thumbnail_list_frame, fg_color="transparent")
-            thumb_frame.pack(padx=5, pady=5, fill="x")
-            thumb_frame.grid_columnconfigure(0, weight=1)
+        num_pages = len(current_doc)
+        for page_num in range(num_pages):
+            container_frame = ctk.CTkFrame(self.thumbnail_list_frame, fg_color="transparent")
+            container_frame.pack(padx=5, pady=5, fill="x")
+            container_frame.grid_columnconfigure(0, weight=1)
+            container_frame.grid_columnconfigure(1, weight=0)
 
             thumb_img = self._get_page_thumbnail(current_doc[page_num])
             
-            btn = ctk.CTkButton(thumb_frame, image=thumb_img, text=f"Pag. {page_num + 1}", compound="top", font=ctk.CTkFont(size=11), command=lambda idx=page_num: self._display_page_details(idx))
-            btn.grid(row=0, column=0, sticky="ew")
+            btn = ctk.CTkButton(container_frame, image=thumb_img, text=f"Pag. {page_num + 1}", compound="top", font=ctk.CTkFont(size=11), command=lambda idx=page_num: self._display_page_details(idx), cursor="hand2")
+            btn.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-            if len(current_doc) > 1:
-                delete_btn = ctk.CTkButton(thumb_frame, text="X", width=20, height=20, fg_color="red", hover_color="darkred", command=lambda idx=page_num: self.delete_page(idx))
-                delete_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-5, y=5)
+            actions_subframe = ctk.CTkFrame(container_frame, fg_color="transparent")
+            actions_subframe.grid(row=0, column=1, sticky="ns")
             
-            self.page_thumbnail_widgets.append({"frame": thumb_frame, "button": btn})
+            move_up_btn = ctk.CTkButton(actions_subframe, text="▲", width=28, command=lambda idx=page_num: self._move_page(idx, 'up'))
+            move_up_btn.pack(padx=2, pady=(0, 2), fill="x")
+            if page_num == 0:
+                move_up_btn.configure(state="disabled")
 
-        if len(current_doc) > 0:
-            if self.active_page_index >= len(current_doc) or self.active_page_index < 0:
+            move_down_btn = ctk.CTkButton(actions_subframe, text="▼", width=28, command=lambda idx=page_num: self._move_page(idx, 'down'))
+            move_down_btn.pack(padx=2, pady=2, fill="x")
+            if page_num == num_pages - 1:
+                move_down_btn.configure(state="disabled")
+            
+            if num_pages > 1:
+                delete_btn = ctk.CTkButton(actions_subframe, text="X", width=28, fg_color="red", hover_color="darkred", command=lambda idx=page_num: self.delete_page(idx))
+                delete_btn.pack(padx=2, pady=(10, 0), fill="x")
+            
+            self.page_thumbnail_widgets.append({"frame": container_frame, "button": btn})
+
+        if num_pages > 0:
+            if self.active_page_index >= num_pages or self.active_page_index < 0:
                 self.active_page_index = 0
             self._display_page_details(self.active_page_index)
         else:
             self._clear_details()
+
+    def _move_page(self, page_index, direction):
+        self._ensure_modifiable_doc()
+        num_pages = len(self.modified_doc)
+        new_active_index = -1
+
+        if direction == 'up' and page_index > 0:
+            self.modified_doc.move_page(page_index, page_index - 1)
+            new_active_index = page_index - 1
+        elif direction == 'down' and page_index < num_pages - 1:
+            self.modified_doc.move_page(page_index, page_index + 2)
+            new_active_index = page_index + 1
+        
+        if new_active_index != -1:
+            self.active_page_index = new_active_index
+            self.save_button.configure(state="normal")
+            self._populate_thumbnail_list()
 
     def _get_page_thumbnail(self, page, size=(150, 150)):
         pix = page.get_pixmap(dpi=72)
@@ -475,6 +637,7 @@ class PDFCheckerApp(ctk.CTkFrame):
             self.add_pages_button.configure(state="normal")
             self.extract_pages_button.configure(state="normal")
             self.add_margins_button.configure(state="normal")
+            self.resize_button.configure(state="normal")
 
         except Exception as e:
             messagebox.showerror("Errore Visualizzazione", f"Impossibile mostrare dettagli pagina.\n\nDettagli: {e}", parent=self)
@@ -541,6 +704,15 @@ class PDFCheckerApp(ctk.CTkFrame):
             self._ensure_modifiable_doc()
             self.modified_doc.delete_page(page_index)
             self.save_button.configure(state="normal")
+            
+            if len(self.modified_doc) > 0:
+                if self.active_page_index == page_index:
+                    self.active_page_index = max(0, page_index - 1)
+                elif self.active_page_index > page_index:
+                    self.active_page_index -= 1
+            else:
+                self.active_page_index = -1
+                
             self._populate_thumbnail_list()
         except Exception as e:
             messagebox.showerror("Errore Eliminazione", f"Impossibile eliminare la pagina.\n\nDettagli: {e}", parent=self)
@@ -625,24 +797,18 @@ class PDFCheckerApp(ctk.CTkFrame):
                 messagebox.showerror("Errore di Salvataggio", f"Impossibile salvare il file.\n\nDettagli: {e}", parent=self)
 
     def extract_pages(self):
-        """
-        Apre un dialogo per selezionare le pagine, poi le estrae come file PDF singoli.
-        """
         current_doc = self.modified_doc if self.modified_doc else self.doc
-        if not current_doc:
-            return
+        if not current_doc: return
 
         dialog = PageSelectionDialog(self, current_doc, title="Seleziona Pagine da Estrarre", button_text="Estrai")
         self.wait_window(dialog)
         selected_pages = dialog.selected_pages
 
-        if not selected_pages:
-            return
+        if not selected_pages: return
 
         save_folder = filedialog.askdirectory(parent=self, title="Seleziona la cartella dove salvare le pagine estratte")
         
-        if not save_folder:
-            return
+        if not save_folder: return
 
         try:
             base_filename = os.path.splitext(os.path.basename(self.doc_path))[0]
@@ -665,8 +831,7 @@ class PDFCheckerApp(ctk.CTkFrame):
 
     def open_add_margins_dialog(self):
         current_doc = self.modified_doc if self.modified_doc else self.doc
-        if not current_doc:
-            return
+        if not current_doc: return
         
         dialog = AddMarginsDialog(self)
         self.wait_window(dialog)
@@ -676,8 +841,7 @@ class PDFCheckerApp(ctk.CTkFrame):
 
     def _apply_margins(self, settings):
         current_doc = self.modified_doc if self.modified_doc else self.doc
-        if not current_doc:
-            return
+        if not current_doc: return
 
         scope = settings["scope"]
         page_indices = []
@@ -692,21 +856,19 @@ class PDFCheckerApp(ctk.CTkFrame):
             self.wait_window(dialog)
             page_indices = dialog.selected_pages
         
-        if not page_indices:
-            return
+        if not page_indices: return
 
         try:
             self._ensure_modifiable_doc()
             
-            margin_top_points = settings["margin_top"] * 2.83465
-            margin_bottom_points = settings["margin_bottom"] * 2.83465
-            margin_left_points = settings["margin_left"] * 2.83465
-            margin_right_points = settings["margin_right"] * 2.83465
+            margin_top_points = settings["margin_top"] * MM_TO_PT
+            margin_bottom_points = settings["margin_bottom"] * MM_TO_PT
+            margin_left_points = settings["margin_left"] * MM_TO_PT
+            margin_right_points = settings["margin_right"] * MM_TO_PT
 
             hex_color = settings["color_hex"].lstrip('#')
             rgb_color = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
-            # Per evitare problemi con gli indici che cambiano, processa in ordine inverso
             page_indices.sort(reverse=True)
 
             for i in page_indices:
@@ -720,18 +882,14 @@ class PDFCheckerApp(ctk.CTkFrame):
                     original_rect.y1 + margin_bottom_points
                 )
                 
-                # Crea un documento temporaneo con la nuova pagina
                 temp_doc = fitz.open()
                 new_page = temp_doc.new_page(width=new_rect.width, height=new_rect.height)
                 
-                # Disegna lo sfondo colorato
                 new_page.draw_rect(new_page.rect, color=rgb_color, fill=rgb_color)
                 
-                # Inserisce il contenuto della vecchia pagina al centro della nuova
                 target_rect = fitz.Rect(margin_left_points, margin_top_points, new_rect.width - margin_right_points, new_rect.height - margin_bottom_points)
                 new_page.show_pdf_page(target_rect, self.modified_doc, i)
                 
-                # Sostituisce la pagina
                 self.modified_doc.delete_page(i)
                 self.modified_doc.insert_pdf(temp_doc, from_page=0, to_page=0, start_at=i)
                 temp_doc.close()
@@ -742,6 +900,79 @@ class PDFCheckerApp(ctk.CTkFrame):
 
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile aggiungere i margini.\n\nDettagli: {e}", parent=self)
+            
+    def open_resize_dialog(self):
+        current_doc = self.modified_doc if self.modified_doc else self.doc
+        if not current_doc: return
+        
+        current_page = None
+        if self.active_page_index != -1:
+            current_page = current_doc[self.active_page_index]
+
+        dialog = ResizePageDialog(self, current_page=current_page)
+        self.wait_window(dialog)
+        
+        if dialog.result:
+            self._apply_resize(dialog.result)
+
+    def _apply_resize(self, settings):
+        current_doc = self.modified_doc if self.modified_doc else self.doc
+        if not current_doc: return
+
+        scope = settings["scope"]
+        page_indices = []
+
+        if scope == "current":
+            if self.active_page_index != -1:
+                page_indices.append(self.active_page_index)
+        elif scope == "all":
+            page_indices = list(range(len(current_doc)))
+        elif scope == "selected":
+            dialog = PageSelectionDialog(self, current_doc, title="Seleziona Pagine da Ridimensionare", button_text="Applica")
+            self.wait_window(dialog)
+            page_indices = dialog.selected_pages
+        
+        if not page_indices: return
+
+        try:
+            self._ensure_modifiable_doc()
+            
+            new_width_pt = settings["width_cm"] * CM_TO_PT
+            new_height_pt = settings["height_cm"] * CM_TO_PT
+
+            page_indices.sort(reverse=True)
+
+            for i in page_indices:
+                old_page = self.modified_doc[i]
+                
+                temp_doc = fitz.open()
+                new_page = temp_doc.new_page(width=new_width_pt, height=new_height_pt)
+                
+                target_rect = new_page.rect
+                if settings["keep_aspect_ratio"]:
+                    zoom_x = new_width_pt / old_page.rect.width
+                    zoom_y = new_height_pt / old_page.rect.height
+                    scale = min(zoom_x, zoom_y)
+                    
+                    final_w = old_page.rect.width * scale
+                    final_h = old_page.rect.height * scale
+                    
+                    pos_x = (new_width_pt - final_w) / 2
+                    pos_y = (new_height_pt - final_h) / 2
+                    target_rect = fitz.Rect(pos_x, pos_y, pos_x + final_w, pos_y + final_h)
+
+                new_page.show_pdf_page(target_rect, self.modified_doc, i)
+                
+                self.modified_doc.delete_page(i)
+                self.modified_doc.insert_pdf(temp_doc, from_page=0, to_page=0, start_at=i)
+                temp_doc.close()
+                
+            self.save_button.configure(state="normal")
+            self._populate_thumbnail_list()
+            messagebox.showinfo("Successo", f"Ridimensionamento applicato a {len(page_indices)} pagina/e.", parent=self)
+
+        except Exception as e:
+            messagebox.showerror("Errore", f"Impossibile ridimensionare le pagine.\n\nDettagli: {e}", parent=self)
 
 
     def _clear_all(self):
@@ -762,6 +993,7 @@ class PDFCheckerApp(ctk.CTkFrame):
         self.add_pages_button.configure(state="disabled")
         self.extract_pages_button.configure(state="disabled")
         self.add_margins_button.configure(state="disabled")
+        self.resize_button.configure(state="disabled")
         self.save_button.configure(state="disabled")
 
 def create_tab(tab_view):
@@ -769,3 +1001,4 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = PDFCheckerApp(master=tab)
     return tab_name, app_instance
+

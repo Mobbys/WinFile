@@ -16,7 +16,7 @@ from packaging import version
 
 # --- CONFIGURAZIONE AGGIORNAMENTI ---
 GITHUB_REPO = "Mobbys/WinFile" 
-CURRENT_VERSION = "3.5" # Questa deve corrispondere alla versione nel setup.py
+CURRENT_VERSION = "3.7" # Questa deve corrispondere alla versione nel setup.py
 
 # Il repository è pubblico, quindi non è necessario un token di accesso.
 

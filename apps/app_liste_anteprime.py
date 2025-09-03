@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.0.5 (Logica Raggruppamento in CSV)
+# app_liste_anteprime.py - v4.3.0 (UI Affinata e Terminologia)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -146,14 +146,18 @@ class FileScannerApp(ctk.CTkFrame):
         tree_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         tree_frame.grid_rowconfigure(0, weight=1); tree_frame.grid_columnconfigure(0, weight=1)
 
-        columns = ("filename", "dimensions_cm", "path")
+        columns = ("filename", "dimensions_cm", "area_sqm", "path")
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings")
         self.tree.column("#0", width=30, stretch=False, anchor="center")
         self.tree.heading("#0", text="")
         self.tree.heading("filename", text="Nome File / Pagina", command=lambda: self.sort_by_column("filename"))
         self.tree.heading("dimensions_cm", text="Dimensioni (cm)", command=lambda: self.sort_by_column("dimensions_cm"))
-        self.tree.heading("path", text="Percorso", command=lambda: self.sort_by_column("path"))
-        self.tree.column("filename", width=300); self.tree.column("dimensions_cm", width=150, anchor="center"); self.tree.column("path", width=350)
+        self.tree.heading("area_sqm", text="Area (m²)", command=lambda: self.sort_by_column("area_sqm"))
+        self.tree.heading("path", text="Sottocartella", command=lambda: self.sort_by_column("path"))
+        self.tree.column("filename", width=250); 
+        self.tree.column("dimensions_cm", width=160, anchor="center")
+        self.tree.column("area_sqm", width=110, anchor="center")
+        self.tree.column("path", width=150)
         scrollbar = ctk.CTkScrollbar(tree_frame, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); scrollbar.grid(row=0, column=1, sticky="ns")
@@ -202,12 +206,21 @@ class FileScannerApp(ctk.CTkFrame):
         if col == "filename": 
             sort_key = lambda item: item['filename'].lower()
         elif col == "path": 
-            sort_key = lambda item: os.path.relpath(item['path'], item.get('scan_root', '')).lower()
+            sort_key = lambda item: self._get_display_path(item).lower()
         elif col == "dimensions_cm":
             def get_area(item):
-                try: return item['pages_details'][0]['width_cm'] * item['pages_details'][0]['height_cm']
+                try: 
+                    page_detail = item['pages_details'][0]
+                    return page_detail.get('trim_area_sqm', page_detail.get('area_sqm', 0))
                 except (IndexError, KeyError): return 0
             sort_key = get_area
+        elif col == "area_sqm":
+            def get_area_sqm(item):
+                try: 
+                    page_detail = item['pages_details'][0]
+                    return page_detail.get('trim_area_sqm', page_detail.get('area_sqm', 0))
+                except (IndexError, KeyError): return 0
+            sort_key = get_area_sqm
         else: return
 
         self.scan_results.sort(key=sort_key, reverse=self.sort_state['reverse'])
@@ -215,11 +228,12 @@ class FileScannerApp(ctk.CTkFrame):
         self.repopulate_treeview()
 
     def update_column_headings(self):
-        for col in ("filename", "dimensions_cm", "path"):
+        for col in ("filename", "dimensions_cm", "area_sqm", "path"):
             original_text = self.tree.heading(col, "text").split(" ")[0]
             if col == "filename": original_text = "Nome File / Pagina"
             elif col == "dimensions_cm": original_text = "Dimensioni (cm)"
-            elif col == "path": original_text = "Percorso"
+            elif col == "area_sqm": original_text = "Area (m²)"
+            elif col == "path": original_text = "Sottocartella"
             
             if col == self.sort_state['col']:
                 arrow = '▼' if self.sort_state['reverse'] else '▲'
@@ -238,7 +252,7 @@ class FileScannerApp(ctk.CTkFrame):
             button.configure(state=state)
 
     def create_context_menu(self):
-        self.option_add("*Menu.font", ("Segoe UI", 13))
+        self.option_add("*Menu.font", ("Segoe UI", 10))
         self.context_menu = Menu(self, tearoff=0)
         self.context_menu.add_command(label="Copia selezione negli appunti", command=self.copy_selection_to_clipboard)
         self.context_menu.add_command(label="Copia selezione formattata", command=lambda: self.copy_formatted_to_clipboard(selection_mode=True))
@@ -255,7 +269,7 @@ class FileScannerApp(ctk.CTkFrame):
 
     def style_treeview(self):
         style = ttk.Style()
-        font, row_height = ("Segoe UI", 13), 28
+        font, row_height = ("Segoe UI", 10), 22 
         if ctk.get_appearance_mode() == "Dark":
             bg, fg, field_bg = "#2B2B2B", "white", "#343638"
             sel, odd, even = "#1f6aa5", "#242424", "#2B2B2B"
@@ -267,7 +281,7 @@ class FileScannerApp(ctk.CTkFrame):
         style.theme_use("default")
         style.configure("Treeview", background=bg, foreground=fg, fieldbackground=field_bg, borderwidth=0, font=font, rowheight=row_height)
         style.map('Treeview', background=[('selected', sel)])
-        style.configure("Treeview.Heading", background=field_bg, foreground=fg, relief="flat", font=(font[0], font[1] + 1, "bold"))
+        style.configure("Treeview.Heading", background=field_bg, foreground=fg, relief="flat", font=(font[0], font[1], "bold"))
         style.map("Treeview.Heading", background=[('active', sel)])
         self.tree.tag_configure('oddrow', background=odd)
         self.tree.tag_configure('evenrow', background=even)
@@ -281,7 +295,8 @@ class FileScannerApp(ctk.CTkFrame):
                 with Image.open(file_path) as img:
                     w_px, h_px = img.size; dpi_x, dpi_y = img.info.get('dpi', (DEFAULT_DPI, DEFAULT_DPI))
                     w_cm = (w_px / (dpi_x or DEFAULT_DPI)) * 2.54; h_cm = (h_px / (dpi_y or DEFAULT_DPI)) * 2.54
-                    details.update({"w_px": w_px, "h_px": h_px, "page_count": 1, "pages_details": [{"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm}], "dpi_str": f"{int(dpi_x or DEFAULT_DPI)} DPI"})
+                    area_sqm = (w_cm * h_cm) / 10000
+                    details.update({"w_px": w_px, "h_px": h_px, "page_count": 1, "pages_details": [{"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm, "area_sqm": area_sqm}], "dpi_str": f"{int(dpi_x or DEFAULT_DPI)} DPI"})
                     return details
             elif ext in ('.pdf', '.ai'):
                 try:
@@ -289,20 +304,32 @@ class FileScannerApp(ctk.CTkFrame):
                         if not doc: raise ValueError("Documento vuoto")
                         pages_details = []
                         for i, page in enumerate(doc):
-                            rect = page.rect; w_cm, h_cm = (rect.width/72)*2.54, (rect.height/72)*2.54
-                            aspect_ratio = rect.width / rect.height if rect.height else 1
-                            pages_details.append({"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm, "aspect_ratio": aspect_ratio})
+                            rect = page.rect
+                            w_cm, h_cm = (rect.width/72)*2.54, (rect.height/72)*2.54
+                            area_sqm = (w_cm * h_cm) / 10000
+                            page_detail = {
+                                "dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", 
+                                "width_cm": w_cm, "height_cm": h_cm, 
+                                "area_sqm": area_sqm
+                            }
+                            trim_rect = page.trimbox
+                            if trim_rect and trim_rect != rect:
+                                trim_w_cm = (trim_rect.width / 72) * 2.54
+                                trim_h_cm = (trim_rect.height / 72) * 2.54
+                                trim_area_sqm = (trim_w_cm * trim_h_cm) / 10000
+                                page_detail['trim_dimensions_cm'] = f"{trim_w_cm:.2f} x {trim_h_cm:.2f}"
+                                page_detail['trim_area_sqm'] = trim_area_sqm
+                            pages_details.append(page_detail)
                         details.update({"page_count": len(doc), "pages_details": pages_details, "type": "AI" if ext == '.ai' else "PDF"})
                         return details
                 except Exception:
-                    details.update({"type": "AI (Non compatibile)" if ext == '.ai' else "PDF (Danneggiato)", "page_count": 1, "pages_details": [{"dimensions_cm": "Non rilevabili", "width_cm": 0, "height_cm": 0, "aspect_ratio": 1}]})
+                    details.update({"type": "AI (Non compatibile)" if ext == '.ai' else "PDF (Danneggiato)", "page_count": 1, "pages_details": [{"dimensions_cm": "Non rilevabili", "width_cm": 0, "height_cm": 0, "area_sqm": 0}]})
                     return details
         except Exception as e:
             print(f"Errore analisi file {file_path}: {e}")
-            return {"filename": os.path.basename(file_path), "type": "ERRORE", "path": os.path.dirname(file_path), "page_count": 1, "pages_details": [{"dimensions_cm": "Errore lettura", "width_cm": 0, "height_cm": 0, "aspect_ratio": 1}]}
+            return {"filename": os.path.basename(file_path), "type": "ERRORE", "path": os.path.dirname(file_path), "page_count": 1, "pages_details": [{"dimensions_cm": "Errore lettura", "width_cm": 0, "height_cm": 0, "area_sqm": 0}]}
 
     def update_scan_progress(self, current_path, count):
-        """Aggiorna la barra di stato in modo sicuro dal thread principale."""
         self.status_text.set(f"Scansione: {os.path.basename(current_path)}... ({count} file trovati)")
 
     def process_paths(self, paths):
@@ -338,12 +365,10 @@ class FileScannerApp(ctk.CTkFrame):
 
     def _get_display_path(self, file_info):
         scan_root = file_info.get('scan_root', '')
-        if not scan_root: return file_info['path']
-        try:
-            rel_path = os.path.relpath(file_info['path'], scan_root)
-            return "." if rel_path == "." else rel_path
-        except ValueError:
-            return file_info['path']
+        file_dir = file_info['path']
+        if not scan_root or os.path.normpath(file_dir) == os.path.normpath(scan_root):
+            return "."
+        return os.path.basename(file_dir)
 
     def repopulate_treeview(self):
         selection = self.tree.selection()
@@ -361,10 +386,16 @@ class FileScannerApp(ctk.CTkFrame):
         for i, scan_root in enumerate(sorted_scan_roots):
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             folder_id = f"folder_{scan_root}"
-            is_open = folder_id in open_items or not open_items # Apri di default alla prima esecuzione
+            is_open = folder_id in open_items or not open_items
             
-            # Inserisce la riga della cartella di origine
-            self.tree.insert("", "end", iid=folder_id, values=(os.path.basename(scan_root), f"({len(grouped_results[scan_root])} file)", scan_root),
+            total_folder_sqm = sum(p.get('area_sqm', 0) for file_info in grouped_results[scan_root] for p in file_info['pages_details'])
+            total_folder_trim_sqm = sum(p.get('trim_area_sqm', p.get('area_sqm', 0)) for file_info in grouped_results[scan_root] for p in file_info['pages_details'])
+            
+            area_display = f"{total_folder_sqm:.4f}"
+            if abs(total_folder_sqm - total_folder_trim_sqm) > 0.0001:
+                area_display += f" ({total_folder_trim_sqm:.4f})"
+
+            self.tree.insert("", "end", iid=folder_id, values=(os.path.basename(scan_root), f"({len(grouped_results[scan_root])} file)", area_display, scan_root),
                              open=is_open, tags=('folder_row',))
             
             for file_info in grouped_results[scan_root]:
@@ -372,14 +403,41 @@ class FileScannerApp(ctk.CTkFrame):
                 display_path = self._get_display_path(file_info)
 
                 if (page_count := file_info.get('page_count', 1)) > 1:
+                    total_file_sqm = sum(p.get('area_sqm', 0) for p in file_info['pages_details'])
+                    total_file_trim_sqm = sum(p.get('trim_area_sqm', p.get('area_sqm', 0)) for p in file_info['pages_details'])
+                    
+                    area_display_file = f"{total_file_sqm:.4f}"
+                    if abs(total_file_sqm - total_file_trim_sqm) > 0.0001:
+                         area_display_file += f" ({total_file_trim_sqm:.4f})"
+
                     parent_id = f"file_{path_id}"
-                    self.tree.insert(folder_id, "end", iid=parent_id, values=(f"{file_info['filename']} ({page_count} pagine)", "Multi-pagina", display_path), 
+                    self.tree.insert(folder_id, "end", iid=parent_id, values=(f"{file_info['filename']} ({page_count} pagine)", "Multi-pagina", area_display_file, display_path), 
                                      tags=(tag,), open=(parent_id in open_items))
                     for page_num in range(page_count):
-                        self.tree.insert(parent_id, "end", iid=f"{path_id}_{page_num}", values=(f"   Pagina {page_num + 1}", file_info["pages_details"][page_num]["dimensions_cm"], ""), tags=(tag,))
+                        page_details = file_info["pages_details"][page_num]
+                        
+                        dims_display = page_details["dimensions_cm"]
+                        if 'trim_dimensions_cm' in page_details:
+                            dims_display += f" ({page_details['trim_dimensions_cm']})"
+                        
+                        area_page_display = f"{page_details.get('area_sqm', 0):.4f}"
+                        if 'trim_area_sqm' in page_details:
+                             area_page_display += f" ({page_details.get('trim_area_sqm', 0):.4f})"
+
+                        self.tree.insert(parent_id, "end", iid=f"{path_id}_{page_num}", values=(f"   Pagina {page_num + 1}", dims_display, area_page_display, ""), tags=(tag,))
                     total_rows += page_count
                 else:
-                    self.tree.insert(folder_id, "end", iid=f"{path_id}_0", values=(file_info['filename'], file_info["pages_details"][0]["dimensions_cm"], display_path), tags=(tag,))
+                    page_details = file_info["pages_details"][0]
+                    
+                    dims_display = page_details["dimensions_cm"]
+                    if 'trim_dimensions_cm' in page_details:
+                        dims_display += f" ({page_details['trim_dimensions_cm']})"
+                        
+                    area_page_display = f"{page_details.get('area_sqm', 0):.4f}"
+                    if 'trim_area_sqm' in page_details:
+                         area_page_display += f" ({page_details.get('trim_area_sqm', 0):.4f})"
+
+                    self.tree.insert(folder_id, "end", iid=f"{path_id}_0", values=(file_info['filename'], dims_display, area_page_display, display_path), tags=(tag,))
                     total_rows += 1
 
         if selection:
@@ -499,13 +557,12 @@ class FileScannerApp(ctk.CTkFrame):
             else:
                 data, page_num = self._find_item_data_by_id(iid)
                 if data:
-                    if iid.startswith("file_"): # Multi-pagina, aggiungi tutte le pagine
+                    if iid.startswith("file_"): 
                          for pn in range(data.get('page_count', 1)):
                             selected_pages_set.add((data['path'], data['filename'], pn))
-                    else: # Pagina singola o file singolo
+                    else: 
                         selected_pages_set.add((data['path'], data['filename'], page_num))
 
-        # Ricostruisci la lista di dizionari nell'ordine originale
         all_pages = [{'file_info': fi, 'page_num': pn} for fi in self.scan_results for pn in range(fi.get('page_count', 1))]
         selected_pages = [p for p in all_pages if (p['file_info']['path'], p['file_info']['filename'], p['page_num']) in selected_pages_set]
         return selected_pages
@@ -552,7 +609,6 @@ class FileScannerApp(ctk.CTkFrame):
         for page in pages_to_export:
              full_path = os.path.join(page['file_info']['path'], page['file_info']['filename'])
              if (full_path, page['page_num']) in selected_pages_keys:
-                # Usa scan_root per il raggruppamento
                 grouped_pages[page['file_info']['scan_root']].append(page)
 
         file_colors = ['#DB4437', '#4285F4', '#F4B400', '#0F9D58', '#AB47BC', '#E91E63', '#9C27B0', '#673AB7', '#009688']
@@ -590,10 +646,10 @@ class FileScannerApp(ctk.CTkFrame):
             .folder-path{font-weight:700;font-size:1.2em;float:left}
             .folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}
             
-            /* Layout Specifics */
-            .page-content.page-layout .folder-header { flex-basis: 100%; }
-            .page-content.list-layout .folder-header { width: 100%; }
-            .page-content.grid-layout .folder-header { grid-column: 1 / -1; } /* Full span for grid */
+            .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation { flex-basis: 100%; }
+            .page-content.list-layout .folder-header, .page-content.list-layout .folder-annotation { width: 100%; }
+            .page-content.grid-layout .folder-header, .page-content.grid-layout .folder-annotation { grid-column: 1 / -1; }
+            .folder-annotation { margin-bottom: 10px; }
             
             .page-content.grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--item-width), 1fr)); gap: 10px; align-content: start; }
             .page-content.list-layout { display: flex; flex-direction: column; gap: 8px; flex-wrap: nowrap; }
@@ -607,19 +663,27 @@ class FileScannerApp(ctk.CTkFrame):
             .item-info-header{display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;}
             .filename{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;color:#212529; flex-grow: 1; padding-right: 5px;}
             .metadata{font-size: 11px; color: #6c757d;}
+            .trim-info{font-size: 10px; color: #d9534f; font-weight: bold;}
             .page-indicator{font-size:.8em;color:#fff;padding:2px 5px;border-radius:3px; text-shadow: 1px 1px 2px #000; flex-shrink: 0; font-weight: bold;}
             .item-checkbox {position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; z-index: 10; cursor: pointer; background-color: rgba(255,255,255,0.7); border-radius: 3px;}
             
-            /* Item Layouts */
             .page-content.page-layout .item { width: var(--item-width); }
             .page-content.grid-layout .item-img-container { height: calc(var(--item-width) * 0.75); }
             .page-content.list-layout .item { flex-direction: row; align-items: center; width: 100%; }
             .page-content.list-layout .item-img-container { width: calc(var(--item-width) / 2.5); height: calc(var(--item-width) / 2.5); border-right: 1px solid #ccc; border-bottom: none; }
             .page-content.list-layout .item-info { flex-grow: 1; border: none; }
             
-            .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px;}
+            .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px; color: red;}
             #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
             
+            body.annotations-hidden .annotation-area { display: none !important; }
+            .switch { position: relative; display: inline-block; width: 40px; height: 20px; vertical-align: middle;}
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+            input:checked + .slider { background-color: #f44336; }
+            input:checked + .slider:before { transform: translateX(20px); }
+
             @media print{
                 body{background-color:#fff !important; margin:0; padding:0;}
                 .controls, #loader, .item-checkbox {display:none !important;}
@@ -628,15 +692,13 @@ class FileScannerApp(ctk.CTkFrame):
                 .page:last-child { page-break-after: auto; }
                 .folder-header{background-color:#f0f0f0!important;-webkit-print-color-adjust:exact;}
                 .item.hide-for-print { display: none !important; }
-                .annotation-area:not(.show-on-print) {display: none !important;}
                 .item-info {background-color: #fff !important; border-color: #ddd !important; color: #000 !important; -webkit-print-color-adjust: exact;}
-                .annotation-area.show-on-print {display: block !important;}
-                .page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact}
+                .page-indicator{background-color:var(--bg-color)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
             }
             </style>"""
         js_script = """<script>
             const state = {
-                view: 'page', // 'page', 'grid', 'list'
+                view: 'grid', 
                 itemWidth: 200, 
             };
 
@@ -647,9 +709,13 @@ class FileScannerApp(ctk.CTkFrame):
                 renderAllPages();
             }
 
+            function toggleAnnotationsVisibility(hide) {
+                document.body.classList.toggle('annotations-hidden', hide);
+            }
+
             function renderAllPages() {
                 const viewContainer = document.getElementById('view-container');
-                viewContainer.innerHTML = ''; // Svuota
+                viewContainer.innerHTML = '';
                 
                 const sourceData = document.getElementById('source-data');
                 const contentToLayout = sourceData.cloneNode(true);
@@ -667,6 +733,7 @@ class FileScannerApp(ctk.CTkFrame):
                     if(folder.style.display === 'none') continue;
                     
                     const header = folder.querySelector('.folder-header');
+                    const folderAnnotation = folder.querySelector('.folder-annotation');
                     const items = Array.from(folder.querySelectorAll('.item'));
 
                     contentWrapper.appendChild(header);
@@ -677,6 +744,18 @@ class FileScannerApp(ctk.CTkFrame):
                         contentWrapper = currentPage.querySelector('.page-content');
                         contentWrapper.className = `page-content ${state.view}-layout`;
                         contentWrapper.appendChild(header);
+                    }
+
+                    if (folderAnnotation) {
+                        contentWrapper.appendChild(folderAnnotation);
+                        if (contentWrapper.scrollHeight > contentHeight) {
+                            contentWrapper.removeChild(folderAnnotation);
+                            currentPage = createNewPage();
+                            viewContainer.appendChild(currentPage);
+                            contentWrapper = currentPage.querySelector('.page-content');
+                            contentWrapper.className = `page-content ${state.view}-layout`;
+                            contentWrapper.appendChild(folderAnnotation);
+                        }
                     }
 
                     for (const item of items) {
@@ -762,11 +841,22 @@ class FileScannerApp(ctk.CTkFrame):
                     const checkbox = item.querySelector('.item-checkbox');
                     item.classList.toggle('hide-for-print', checkbox && !checkbox.checked);
                 });
-                document.querySelectorAll('#view-container .annotation-area').forEach(area => {
-                    const show = area.value.trim() !== '';
-                    area.classList.toggle('show-on-print', show);
-                });
+
+                const emptyAnnotations = [];
+                if (!document.body.classList.contains('annotations-hidden')) {
+                    document.querySelectorAll('#view-container .annotation-area').forEach(area => {
+                        if (area.value.trim() === '') {
+                            area.style.display = 'none';
+                            emptyAnnotations.push(area);
+                        }
+                    });
+                }
+
                 window.print();
+
+                emptyAnnotations.forEach(area => {
+                    area.style.display = '';
+                });
             }
             
             async function createWysiwygPdf(outputAction = 'save') {
@@ -798,11 +888,21 @@ class FileScannerApp(ctk.CTkFrame):
                                 clonedItem.querySelector('.item-checkbox')?.remove();
                                 const originalTextarea = document.getElementById(clonedItem.id)?.querySelector('.annotation-area');
                                 const clonedTextarea = clonedItem.querySelector('.annotation-area');
-                                if (originalTextarea && clonedTextarea) {
-                                    if(originalTextarea.value.trim() === '') clonedTextarea.remove();
-                                    else clonedTextarea.textContent = originalTextarea.value;
+                                if (document.body.classList.contains('annotations-hidden') || (originalTextarea && originalTextarea.value.trim() === '')) {
+                                    clonedTextarea?.remove();
+                                } else if (originalTextarea && clonedTextarea) {
+                                    clonedTextarea.textContent = originalTextarea.value;
                                 }
                              }
+                        });
+
+                        contentToPrint.querySelectorAll('.folder-annotation').forEach(clonedAnnotation => {
+                           const originalAnnotation = document.getElementById(clonedAnnotation.id);
+                           if (document.body.classList.contains('annotations-hidden') || (originalAnnotation && originalAnnotation.value.trim() === '')) {
+                               clonedAnnotation.remove();
+                           } else if (originalAnnotation) {
+                               clonedAnnotation.textContent = originalAnnotation.value;
+                           }
                         });
                         
                         document.body.appendChild(contentToPrint);
@@ -846,27 +946,32 @@ class FileScannerApp(ctk.CTkFrame):
                 document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
                 let itemCounter = 0;
                 document.querySelectorAll('.item').forEach(item => item.id = `item-${itemCounter++}`);
-                switchView('page');
+                switchView('grid');
             });
         </script>"""
         
-        # HTML: Crea una singola sorgente dati nascosta
         source_html = ""
-        # Ordina per il percorso della cartella di scansione
         sorted_grouped_pages = sorted(grouped_pages.items(), key=lambda item: item[0])
 
         for folder_idx, (folder, pages) in enumerate(sorted_grouped_pages):
             display_folder = os.path.basename(folder)
             num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in pages})
             total_pages = len(pages)
-            total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
             
+            total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['area_sqm'] for p in pages)
+            total_trim_sqm = sum(p['file_info']['pages_details'][p['page_num']].get('trim_area_sqm', p['file_info']['pages_details'][p['page_num']]['area_sqm']) for p in pages)
+            
+            folder_stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
+            if abs(total_sqm - total_trim_sqm) > 0.0001:
+                folder_stats_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
+
             folder_id = f"folder-{folder_idx}"
             source_html += f"""<div class="folder-container" data-folder-id="{folder_id}">
                 <div class="folder-header">
-                    <span class="folder-stats">File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²</span>
+                    <span class="folder-stats">{folder_stats_text}</span>
                     <span class="folder-path">{html.escape(display_folder)}</span>
                 </div>
+                <textarea class="annotation-area folder-annotation" id="anno-{folder_id}" placeholder="Annotazione cartella..."></textarea>
                 <div class="item-container">"""
             
             for page_data in pages:
@@ -889,7 +994,16 @@ class FileScannerApp(ctk.CTkFrame):
                     
                     page_count = item_data.get('page_count', 1)
                     current_color = file_path_to_color.get(full_path, '#808080')
-                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                    
+                    area_sqm_val = page_details.get('area_sqm', 0)
+                    trim_area_sqm_val = page_details.get('trim_area_sqm', area_sqm_val)
+                    
+                    dims_html = f'<span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span>'
+                    trim_html = ''
+                    if 'trim_dimensions_cm' in page_details:
+                        trim_html = f'<div class="trim-info">Al vivo: {page_details["trim_dimensions_cm"]} cm &nbsp; {trim_area_sqm_val:.3f} m²</div>'
+                    
+                    page_indicator_span = f'<span class="page-indicator" style="--bg-color: {current_color}; background-color: {current_color};">Pag. {page_num + 1}/{page_count}</span>' if page_count > 1 else ''
                     
                     source_html += f"""<div class="item" data-folder-id="{folder_id}">
                         <input type="checkbox" class="item-checkbox" checked>
@@ -897,9 +1011,9 @@ class FileScannerApp(ctk.CTkFrame):
                         <div class="item-info">
                             <div class="item-info-header">
                                 <span class="filename">{html.escape(item_data["filename"])}</span>
-                                {'<span class="page-indicator" style="background-color: %s;">Pag. %s/%s</span>' % (current_color, page_num + 1, page_count) if page_count > 1 else ''}
+                                {page_indicator_span}
                             </div>
-                            <div class="metadata"><span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm:.3f} m²</span></div>
+                            <div class="metadata">{dims_html}{trim_html}</div>
                         </div>
                         <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
                     </div>"""
@@ -911,8 +1025,8 @@ class FileScannerApp(ctk.CTkFrame):
             <div id="loader" style="display: none;"><span>Generazione PDF...</span></div>
             <div class="controls">
                 <div class="control-group">
-                    <button class="view-switch-btn" onclick="switchView('page')">Pagina (WYSIWYG)</button>
                     <button class="view-switch-btn" onclick="switchView('grid')">Griglia A4</button>
+                    <button class="view-switch-btn" onclick="switchView('page')">Vista Nesting</button>
                     <button class="view-switch-btn" onclick="switchView('list')">Elenco A4</button>
                 </div>
                 <div class="control-group">
@@ -930,6 +1044,13 @@ class FileScannerApp(ctk.CTkFrame):
                     <button onclick="changeSize(-1)" title="Rimpicciolisci">-</button>
                     <button onclick="changeSize(1)" title="Ingrandisci">+</button>
                 </div>
+                <div class="control-group" style="margin-left: auto;">
+                    <label for="toggle-annotations-cb" style="cursor:pointer; user-select: none;">Nascondi Annotazioni</label>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-annotations-cb" onchange="toggleAnnotationsVisibility(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
             </div>
             <div id="view-container"></div>
             <div id="source-data" style="display:none;">{source_html}</div>
@@ -940,7 +1061,7 @@ class FileScannerApp(ctk.CTkFrame):
 
     def copy_all_to_clipboard(self):
         if not self.scan_results: return
-        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo"]
+        header = ["Nome File / Pagina", "Dimensioni (cm)", "Sottocartella"]
         lines = ["\t".join(header)]
         
         grouped_results = defaultdict(list)
@@ -957,10 +1078,16 @@ class FileScannerApp(ctk.CTkFrame):
                     lines.append(f"{file_info['filename']}\tMulti-pagina\t{rel_path}")
                     for i in range(page_count):
                         page_details = file_info['pages_details'][i]
-                        lines.append(f"  Pagina {i+1}\t{page_details['dimensions_cm']}\t")
+                        dims_display = page_details['dimensions_cm']
+                        if 'trim_dimensions_cm' in page_details:
+                            dims_display += f" ({page_details['trim_dimensions_cm']})"
+                        lines.append(f"  Pagina {i+1}\t{dims_display}\t")
                 else:
                     page_details = file_info['pages_details'][0]
-                    lines.append(f"{file_info['filename']}\t{page_details['dimensions_cm']}\t{rel_path}")
+                    dims_display = page_details['dimensions_cm']
+                    if 'trim_dimensions_cm' in page_details:
+                        dims_display += f" ({page_details['trim_dimensions_cm']})"
+                    lines.append(f"{file_info['filename']}\t{dims_display}\t{rel_path}")
 
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
         self.status_text.set("Tabella raggruppata copiata negli appunti.")
@@ -969,7 +1096,7 @@ class FileScannerApp(ctk.CTkFrame):
         selected_pages = self.get_pages_for_selection(selection_mode=True)
         if not selected_pages: return
         
-        header = ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo"]
+        header = ["Nome File / Pagina", "Dimensioni (cm)", "Sottocartella"]
         lines = ["\t".join(header)]
         
         grouped_pages = defaultdict(list)
@@ -985,7 +1112,11 @@ class FileScannerApp(ctk.CTkFrame):
                 page_count = item.get('page_count', 1)
                 
                 filename_display = f"{item['filename']} (Pag. {page_num + 1})" if page_count > 1 else item['filename']
-                lines.append(f"{filename_display}\t{page_details['dimensions_cm']}\t{rel_path}")
+                dims_display = page_details['dimensions_cm']
+                if 'trim_dimensions_cm' in page_details:
+                    dims_display += f" ({page_details['trim_dimensions_cm']})"
+
+                lines.append(f"{filename_display}\t{dims_display}\t{rel_path}")
 
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
         self.status_text.set(f"Selezione raggruppata copiata ({len(selected_pages)} righe).")
@@ -1015,12 +1146,16 @@ class FileScannerApp(ctk.CTkFrame):
 
     def _build_csv_thread(self, file_path, pages_to_export):
         try:
-            # Ordina le pagine per cartella di origine per raggrupparle nell'output
             pages_to_export.sort(key=lambda p: p['file_info'].get('scan_root', 'N/A'))
             
             with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f, delimiter=';')
-                writer.writerow(["Nome File", "Tipo", "Pagina", "Dimensioni (cm)", "Area (m²)", "Percorso Relativo", "Cartella Principale"])
+                writer.writerow([
+                    "Nome File", "Tipo", "Pagina", 
+                    "Dimensioni (cm)", "Area (m²)", 
+                    "Dimensioni Al vivo (cm)", "Area Al vivo (m²)",
+                    "Sottocartella", "Cartella Principale"
+                ])
                 
                 last_folder = None
                 for page_data in pages_to_export:
@@ -1028,16 +1163,24 @@ class FileScannerApp(ctk.CTkFrame):
                     
                     current_folder = item.get('scan_root', 'N/A')
                     if current_folder != last_folder:
-                        # Aggiunge una riga vuota tra i gruppi di cartelle per leggibilità
                         if last_folder is not None:
                             writer.writerow([])
                         last_folder = current_folder
                         
                     display_path = self._get_display_path(item)
                     page_details = item['pages_details'][page_num]
-                    area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                    
+                    area_sqm = page_details.get('area_sqm', 0)
+                    trim_dims = page_details.get('trim_dimensions_cm', '')
+                    trim_area = page_details.get('trim_area_sqm', 0)
                     page_str = f"{page_num + 1} di {item.get('page_count', 1)}"
-                    writer.writerow([item['filename'], item['type'], page_str, page_details['dimensions_cm'], f"{area_sqm:.4f}", display_path, item.get('scan_root', '')])
+
+                    writer.writerow([
+                        item['filename'], item['type'], page_str, 
+                        page_details['dimensions_cm'], f"{area_sqm:.4f}",
+                        trim_dims, f"{trim_area:.4f}" if trim_area > 0 else "",
+                        display_path, item.get('scan_root', '')
+                    ])
             
             self.after(0, self.on_csv_success, file_path)
         except Exception as e: self.after(0, self.on_csv_error, e)
@@ -1054,11 +1197,11 @@ class FileScannerApp(ctk.CTkFrame):
 
     def _generate_html_table_with_totals(self, pages_to_export, include_headers_footers=True):
         if not pages_to_export: return ""
-        total_area = 0
+        
         html_string = '<table border="1" style="border-collapse: collapse; width: 100%; font-family: sans-serif;">'
         if include_headers_footers:
             html_string += '<thead style="background-color: #e0e0e0;"><tr>'
-            for h in ["Nome File / Pagina", "Dimensioni (cm)", "Percorso Relativo", "Area (m²)"]:
+            for h in ["Nome File / Pagina", "Dimensioni (cm)", "Sottocartella", "Area (m²)"]:
                 html_string += f'<th style="padding: 5px; text-align: left;">{html.escape(h)}</th>'
             html_string += '</tr></thead>'
         
@@ -1067,6 +1210,10 @@ class FileScannerApp(ctk.CTkFrame):
         grouped_pages = defaultdict(list)
         for page_data in pages_to_export:
             grouped_pages[page_data['file_info'].get('scan_root', 'N/A')].append(page_data)
+
+        total_area = 0
+        total_trim_area = 0
+        has_trim_box = False
 
         for folder, pages in sorted(grouped_pages.items()):
             folder_html = f'<tr style="background-color: #f0f0f0; font-weight: bold;"><td colspan="4" style="padding: 5px; border-left: 3px solid #4285f4;">{html.escape(os.path.basename(folder))}</td></tr>'
@@ -1077,14 +1224,32 @@ class FileScannerApp(ctk.CTkFrame):
                 page_details = file_info["pages_details"][page_num]
                 page_count = file_info.get('page_count', 1)
                 filename_display = f"{file_info['filename']} (Pag. {page_num + 1})" if page_count > 1 else file_info['filename']
-                area_sqm = (page_details.get('width_cm', 0) * page_details.get('height_cm', 0)) / 10000
+                
+                dims_display = page_details["dimensions_cm"]
+                if 'trim_dimensions_cm' in page_details:
+                    dims_display += f"<br><small style='color:red;'>Al vivo: {page_details['trim_dimensions_cm']}</small>"
+                    has_trim_box = True
+
+                area_sqm = page_details.get('area_sqm', 0)
+                trim_area_sqm = page_details.get('trim_area_sqm', area_sqm)
                 total_area += area_sqm
+                total_trim_area += trim_area_sqm
+                
+                area_display = f"{area_sqm:.4f}"
+                if 'trim_area_sqm' in page_details:
+                    area_display = f"{trim_area_sqm:.4f}"
+
                 path_display = self._get_display_path(file_info)
-                html_string += f'<tr><td style="padding:5px">{html.escape(filename_display)}</td><td style="padding:5px">{html.escape(page_details["dimensions_cm"])}</td><td style="padding:5px">{html.escape(path_display)}</td><td style="padding:5px">{area_sqm:.4f}</td></tr>'
+                html_string += f'<tr><td style="padding:5px">{html.escape(filename_display)}</td><td style="padding:5px">{dims_display}</td><td style="padding:5px">{html.escape(path_display)}</td><td style="padding:5px">{area_display}</td></tr>'
                 
         html_string += '</tbody>'
         if include_headers_footers:
-            html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">Totale ({len(pages_to_export)} elementi)</td><td style="padding: 5px;">{total_area:.4f} m²</td></tr></tfoot>'
+            total_text = f"Totale ({len(pages_to_export)} elementi)"
+            area_text = f"{total_trim_area:.4f} m²"
+            if has_trim_box and abs(total_area - total_trim_area) > 0.0001:
+                area_text += f"<br><small>(Originale: {total_area:.4f} m²)</small>"
+
+            html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">{total_text}</td><td style="padding: 5px;">{area_text}</td></tr></tfoot>'
         html_string += '</table>'
         return html_string
 
@@ -1092,10 +1257,8 @@ class FileScannerApp(ctk.CTkFrame):
         if os.name != 'nt':
             raise NotImplementedError("La copia formattata è supportata solo su Windows.")
 
-        # Definizione delle funzioni WinAPI con tipi per robustezza
         user32 = ctypes.WinDLL('user32')
         kernel32 = ctypes.WinDLL('kernel32')
-
         user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
         user32.RegisterClipboardFormatW.restype = wintypes.UINT
         user32.OpenClipboard.argtypes = [wintypes.HWND]
@@ -1104,7 +1267,6 @@ class FileScannerApp(ctk.CTkFrame):
         user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
         user32.SetClipboardData.restype = wintypes.HANDLE
         user32.CloseClipboard.restype = wintypes.BOOL
-
         kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
         kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
         kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
@@ -1125,7 +1287,7 @@ class FileScannerApp(ctk.CTkFrame):
             "StartFragment:{:010d}\r\n"
             "EndFragment:{:010d}\r\n"
         )
-        html_body = f"<!DOCTYPE html><html><body><!--StartFragment-->{html_fragment}<!--EndFragment--></body></html>"
+        html_body = f"<!DOCTYPE html><html><head><style>td{{vertical-align:top;}}</style></head><body><!--StartFragment-->{html_fragment}<!--EndFragment--></body></html>"
         
         header_utf8 = header.encode('utf-8')
         html_body_utf8 = html_body.encode('utf-8')
@@ -1160,7 +1322,7 @@ class FileScannerApp(ctk.CTkFrame):
         try:
             user32.EmptyClipboard()
             if not user32.SetClipboardData(CF_HTML, h_mem):
-                kernel32.GlobalFree(h_mem) # Se SetClipboardData fallisce, dobbiamo liberare la memoria
+                kernel32.GlobalFree(h_mem)
                 raise OSError("Impossibile impostare i dati negli appunti.")
         finally:
             user32.CloseClipboard()
@@ -1198,6 +1360,7 @@ class FileScannerApp(ctk.CTkFrame):
             styles = getSampleStyleSheet()
             filename_style = ParagraphStyle('file_style', parent=styles['Normal'], fontSize=8, alignment=1)
             dims_style = ParagraphStyle('dims_style', parent=styles['Normal'], fontSize=7, textColor=colors.darkgrey, alignment=1)
+            trim_dims_style = ParagraphStyle('trim_dims_style', parent=styles['Normal'], fontSize=6, textColor=colors.red, alignment=1)
             folder_header_style = ParagraphStyle('folder_header', parent=styles['h2'], backColor=colors.lightblue, padding=4, textColor=colors.black)
             story, num_columns = [], options['columns']
             col_width = (doc.width / num_columns) - (cm * 0.2 * (num_columns - 1))
@@ -1206,11 +1369,19 @@ class FileScannerApp(ctk.CTkFrame):
             for folder, pages in sorted_grouped_pages:
                 display_folder = os.path.basename(folder)
                 num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in pages})
-                total_pages, total_sqm = len(pages), sum(p['file_info']['pages_details'][p['page_num']]['width_cm'] * p['file_info']['pages_details'][p['page_num']]['height_cm'] for p in pages) / 10000
-                story.extend([Paragraph(display_folder, folder_header_style), Paragraph(f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²", styles['Normal']), Spacer(1, 0.5*cm)])
+                total_pages = len(pages)
+                total_sqm = sum(p['file_info']['pages_details'][p['page_num']]['area_sqm'] for p in pages)
+                total_trim_sqm = sum(p['file_info']['pages_details'][p['page_num']].get('trim_area_sqm', p['file_info']['pages_details'][p['page_num']]['area_sqm']) for p in pages)
+                
+                area_text = f"Area: {total_sqm:.2f} m²"
+                if abs(total_sqm - total_trim_sqm) > 0.0001:
+                    area_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
+
+                story.extend([Paragraph(display_folder, folder_header_style), Paragraph(f"File: {num_files} | Pagine: {total_pages} | {area_text}", styles['Normal']), Spacer(1, 0.5*cm)])
                 grid_data, row = [], []
                 for page_data in pages:
                     item_data, page_num = page_data['file_info'], page_data['page_num']
+                    page_details = item_data['pages_details'][page_num]
                     full_path = os.path.join(item_data['path'], item_data['filename'])
                     cell_content = []
                     try:
@@ -1228,7 +1399,10 @@ class FileScannerApp(ctk.CTkFrame):
                     page_info = f" (Pag. {page_num + 1}/{item_data.get('page_count', 1)})" if item_data.get('page_count', 1) > 1 else ""
                     cell_content.append(Paragraph(item_data['filename'] + page_info, filename_style))
                     dpi_info = f"({item_data['dpi_str']})" if item_data.get('dpi_str') else ""
-                    cell_content.append(Paragraph(item_data['pages_details'][page_num]['dimensions_cm'] + f" cm {dpi_info}", dims_style))
+                    cell_content.append(Paragraph(page_details['dimensions_cm'] + f" cm {dpi_info}", dims_style))
+                    if 'trim_dimensions_cm' in page_details:
+                        cell_content.append(Paragraph(f"Al vivo: {page_details['trim_dimensions_cm']} cm", trim_dims_style))
+
                     row.append(cell_content)
                     if len(row) == num_columns: grid_data.append(row); row = []
                 if row: row.extend([""] * (num_columns - len(row))); grid_data.append(row)
@@ -1255,5 +1429,4 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
-
 
