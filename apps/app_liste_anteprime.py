@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.6.2 (Totali Stampa su Ultima Pagina)
+# app_liste_anteprime.py - v4.6.3 (Fix Sfondo Stampa Veloce)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -648,7 +648,7 @@ class FileScannerApp(ctk.CTkFrame):
 
             .subfolder-separator-container { width: 100%; display: flex; align-items: center; gap: 10px; margin: 15px 0 5px 0; }
             .subfolder-separator { flex-grow: 1; border: 0; border-top: 1px solid #ccc; }
-            .subfolder-name { font-size: 0.9em; font-weight: bold; color: #555; background-color: #d2d2d2; padding: 0 5px; white-space: nowrap; }
+            .subfolder-name { font-size: 0.9em; font-weight: bold; color: #555; background-color: #d2d2d2 !important; padding: 0 5px; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .subfolder-stats { font-size: 0.8em; color: #666; white-space: nowrap; }
             
             .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation, .page-content.page-layout .subfolder-separator-container { flex-basis: 100%; }
@@ -1561,4 +1561,5 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
+
 
