@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.3.0 (UI Affinata e Terminologia)
+# app_liste_anteprime.py - v4.6.2 (Totali Stampa su Ultima Pagina)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -626,7 +626,7 @@ class FileScannerApp(ctk.CTkFrame):
             :root { --a4-width: 21cm; --a4-height: 29.7cm; --item-width: 200px; }
             body{font-family:'Roboto',sans-serif;margin:0;background-color:#d2d2d2; color:#333;}
             .controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:#fff;padding:10px 20px;box-shadow:0 2px 4px #0000001a;position:sticky;top:0;z-index:1000}
-            .controls button, .controls input {padding:8px 12px;font-size:14px;border:1px solid #ccc;border-radius:5px;font-family:'Roboto',sans-serif;}
+            .controls button, .controls input, .controls select {padding:8px 12px;font-size:14px;border:1px solid #ccc;border-radius:5px;font-family:'Roboto',sans-serif;}
             .controls button {background-color:#e9e9e9;color:#333;cursor:pointer;font-weight:700}
             .print-button{background-color:#4285f4;color:#fff;border-color:#4285f4}
             .control-group{display:flex;align-items:center;gap:5px;padding:5px;border:1px solid #e0e0e0;border-radius:5px}
@@ -645,10 +645,15 @@ class FileScannerApp(ctk.CTkFrame):
             .folder-header{background-color:#e0e0e0;padding:10px 15px;border-left:5px solid #4285f4;overflow:hidden;border-radius:0 5px 5px 0;width:100%;box-sizing:border-box;margin-bottom:5px;}
             .folder-path{font-weight:700;font-size:1.2em;float:left}
             .folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}
+
+            .subfolder-separator-container { width: 100%; display: flex; align-items: center; gap: 10px; margin: 15px 0 5px 0; }
+            .subfolder-separator { flex-grow: 1; border: 0; border-top: 1px solid #ccc; }
+            .subfolder-name { font-size: 0.9em; font-weight: bold; color: #555; background-color: #d2d2d2; padding: 0 5px; white-space: nowrap; }
+            .subfolder-stats { font-size: 0.8em; color: #666; white-space: nowrap; }
             
-            .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation { flex-basis: 100%; }
-            .page-content.list-layout .folder-header, .page-content.list-layout .folder-annotation { width: 100%; }
-            .page-content.grid-layout .folder-header, .page-content.grid-layout .folder-annotation { grid-column: 1 / -1; }
+            .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation, .page-content.page-layout .subfolder-separator-container { flex-basis: 100%; }
+            .page-content.list-layout .folder-header, .page-content.list-layout .folder-annotation, .page-content.list-layout .subfolder-separator-container { width: 100%; }
+            .page-content.grid-layout .folder-header, .page-content.grid-layout .folder-annotation, .page-content.grid-layout .subfolder-separator-container { grid-column: 1 / -1; }
             .folder-annotation { margin-bottom: 10px; }
             
             .page-content.grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--item-width), 1fr)); gap: 10px; align-content: start; }
@@ -701,6 +706,21 @@ class FileScannerApp(ctk.CTkFrame):
                 view: 'grid', 
                 itemWidth: 200, 
             };
+            
+            const pageSizes = {
+                'A4': { width: '21cm', height: '29.7cm' },
+                'A3': { width: '29.7cm', height: '42cm' }
+            };
+
+            function updatePageLayout() {
+                const size = document.getElementById('page-size-select').value;
+                const dimensions = pageSizes[size];
+                
+                document.documentElement.style.setProperty('--a4-width', dimensions.width);
+                document.documentElement.style.setProperty('--a4-height', dimensions.height);
+                
+                renderAllPages(); 
+            }
 
             function switchView(viewName) {
                 state.view = viewName;
@@ -732,43 +752,19 @@ class FileScannerApp(ctk.CTkFrame):
                 for (const folder of folders) {
                     if(folder.style.display === 'none') continue;
                     
-                    const header = folder.querySelector('.folder-header');
-                    const folderAnnotation = folder.querySelector('.folder-annotation');
-                    const items = Array.from(folder.querySelectorAll('.item'));
+                    const childrenToProcess = Array.from(folder.children);
 
-                    contentWrapper.appendChild(header);
-                    if (contentWrapper.scrollHeight > contentHeight) {
-                        contentWrapper.removeChild(header);
-                        currentPage = createNewPage();
-                        viewContainer.appendChild(currentPage);
-                        contentWrapper = currentPage.querySelector('.page-content');
-                        contentWrapper.className = `page-content ${state.view}-layout`;
-                        contentWrapper.appendChild(header);
-                    }
+                    for (const child of childrenToProcess) {
+                        if(child.style.display === 'none') continue;
 
-                    if (folderAnnotation) {
-                        contentWrapper.appendChild(folderAnnotation);
+                        contentWrapper.appendChild(child);
                         if (contentWrapper.scrollHeight > contentHeight) {
-                            contentWrapper.removeChild(folderAnnotation);
+                            contentWrapper.removeChild(child);
                             currentPage = createNewPage();
                             viewContainer.appendChild(currentPage);
                             contentWrapper = currentPage.querySelector('.page-content');
                             contentWrapper.className = `page-content ${state.view}-layout`;
-                            contentWrapper.appendChild(folderAnnotation);
-                        }
-                    }
-
-                    for (const item of items) {
-                        if(item.style.display === 'none') continue;
-                        
-                        contentWrapper.appendChild(item);
-                        if (contentWrapper.scrollHeight > contentHeight) {
-                            contentWrapper.removeChild(item);
-                            currentPage = createNewPage();
-                            viewContainer.appendChild(currentPage);
-                            contentWrapper = currentPage.querySelector('.page-content');
-                            contentWrapper.className = `page-content ${state.view}-layout`;
-                            contentWrapper.appendChild(item);
+                            contentWrapper.appendChild(child);
                         }
                     }
                 }
@@ -778,6 +774,10 @@ class FileScannerApp(ctk.CTkFrame):
             function createNewPage() {
                 const page = document.createElement('div');
                 page.className = 'page';
+                const orientation = document.getElementById('page-orientation-select').value;
+                if (orientation === 'landscape') {
+                    page.classList.add('landscape');
+                }
                 page.innerHTML = '<div class="page-content"></div>';
                 return page;
             }
@@ -821,6 +821,9 @@ class FileScannerApp(ctk.CTkFrame):
                                    nextSourceSibling.parentNode.insertBefore(sourceItem, nextSourceSibling);
                                }
                            } else {
+                               const toContainerId = evt.to.parentElement.id;
+                               const fromContainerId = evt.from.parentElement.id;
+                               // This is a simplified logic, might need adjustment for complex cases
                                const sourceParentContainer = document.querySelector(`#source-data #${evt.to.querySelector('.item').id}`).parentElement;
                                if(sourceParentContainer) {
                                     sourceParentContainer.appendChild(sourceItem);
@@ -873,7 +876,10 @@ class FileScannerApp(ctk.CTkFrame):
                 loader.style.display = 'flex';
                 
                 try {
-                    const pdf = new jsPDF('p', 'mm', 'a4');
+                    const orientation = document.getElementById('page-orientation-select').value;
+                    const size = document.getElementById('page-size-select').value.toLowerCase();
+                    const pdf = new jsPDF(orientation, 'mm', size);
+
                     const sourceElements = document.querySelectorAll('#view-container .page');
                     let firstPage = true;
 
@@ -896,12 +902,14 @@ class FileScannerApp(ctk.CTkFrame):
                              }
                         });
 
-                        contentToPrint.querySelectorAll('.folder-annotation').forEach(clonedAnnotation => {
+                        contentToPrint.querySelectorAll('.folder-annotation, .subfolder-separator-container').forEach(clonedAnnotation => {
                            const originalAnnotation = document.getElementById(clonedAnnotation.id);
-                           if (document.body.classList.contains('annotations-hidden') || (originalAnnotation && originalAnnotation.value.trim() === '')) {
-                               clonedAnnotation.remove();
-                           } else if (originalAnnotation) {
-                               clonedAnnotation.textContent = originalAnnotation.value;
+                           if (originalAnnotation && originalAnnotation.tagName === 'TEXTAREA') {
+                               if (document.body.classList.contains('annotations-hidden') || (originalAnnotation && originalAnnotation.value.trim() === '')) {
+                                   clonedAnnotation.remove();
+                               } else if (originalAnnotation) {
+                                   clonedAnnotation.textContent = originalAnnotation.value;
+                               }
                            }
                         });
                         
@@ -916,7 +924,7 @@ class FileScannerApp(ctk.CTkFrame):
                         const imgWidth = pdfWidth;
                         const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
 
-                        if (!firstPage) pdf.addPage();
+                        if (!firstPage) pdf.addPage(size, orientation);
                         pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
                         firstPage = false;
                     }
@@ -943,9 +951,9 @@ class FileScannerApp(ctk.CTkFrame):
             }
 
             document.addEventListener("DOMContentLoaded", () => {
-                document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
                 let itemCounter = 0;
                 document.querySelectorAll('.item').forEach(item => item.id = `item-${itemCounter++}`);
+                updatePageLayout(); // Chiamata iniziale
                 switchView('grid');
             });
         </script>"""
@@ -971,10 +979,44 @@ class FileScannerApp(ctk.CTkFrame):
                     <span class="folder-stats">{folder_stats_text}</span>
                     <span class="folder-path">{html.escape(display_folder)}</span>
                 </div>
-                <textarea class="annotation-area folder-annotation" id="anno-{folder_id}" placeholder="Annotazione cartella..."></textarea>
-                <div class="item-container">"""
+                <textarea class="annotation-area folder-annotation" id="anno-{folder_id}" placeholder="Annotazione cartella..."></textarea>"""
+            
+            # Pre-calcola le statistiche per ogni sottocartella
+            subfolder_stats = defaultdict(lambda: {'files': set(), 'pages': 0, 'sqm': 0, 'trim_sqm': 0})
+            for page_data in pages:
+                subfolder = self._get_display_path(page_data['file_info'])
+                if subfolder == ".": continue
+                stats = subfolder_stats[subfolder]
+                stats['files'].add(os.path.join(page_data['file_info']['path'], page_data['file_info']['filename']))
+                stats['pages'] += 1
+                page_details = page_data['file_info']['pages_details'][page_data['page_num']]
+                stats['sqm'] += page_details.get('area_sqm', 0)
+                stats['trim_sqm'] += page_details.get('trim_area_sqm', page_details.get('area_sqm', 0))
+            
+            # Ordina le pagine per sottocartella e inserisce i separatori
+            pages.sort(key=lambda p: (self._get_display_path(p['file_info']) == ".", self._get_display_path(p['file_info'])))
+            last_subfolder = None
             
             for page_data in pages:
+                current_subfolder = self._get_display_path(page_data['file_info'])
+                if current_subfolder != last_subfolder and current_subfolder != ".":
+                    stats = subfolder_stats[current_subfolder]
+                    num_files = len(stats['files'])
+                    total_pages = stats['pages']
+                    total_sqm = stats['sqm']
+                    total_trim_sqm = stats['trim_sqm']
+                    
+                    stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
+                    if abs(total_sqm - total_trim_sqm) > 0.0001:
+                        stats_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
+
+                    source_html += f'''<div class="subfolder-separator-container">
+                        <span class="subfolder-name">{html.escape(current_subfolder)}</span>
+                        <hr class="subfolder-separator">
+                        <span class="subfolder-stats">{stats_text}</span>
+                    </div>'''
+                last_subfolder = current_subfolder
+
                 item_data, page_num = page_data['file_info'], page_data['page_num']
                 full_path = os.path.join(item_data['path'], item_data['filename'])
                 page_details = item_data["pages_details"][page_num]
@@ -1019,7 +1061,7 @@ class FileScannerApp(ctk.CTkFrame):
                     </div>"""
 
                 except Exception as e: print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
-            source_html += '</div></div>'
+            source_html += '</div>'
 
         body = f"""<body>
             <div id="loader" style="display: none;"><span>Generazione PDF...</span></div>
@@ -1028,6 +1070,17 @@ class FileScannerApp(ctk.CTkFrame):
                     <button class="view-switch-btn" onclick="switchView('grid')">Griglia A4</button>
                     <button class="view-switch-btn" onclick="switchView('page')">Vista Nesting</button>
                     <button class="view-switch-btn" onclick="switchView('list')">Elenco A4</button>
+                </div>
+                <div class="control-group">
+                    <label>Formato:</label>
+                    <select id="page-size-select" onchange="updatePageLayout()">
+                        <option value="A4">A4</option>
+                        <option value="A3">A3</option>
+                    </select>
+                    <select id="page-orientation-select" onchange="updatePageLayout()">
+                        <option value="portrait">Verticale</option>
+                        <option value="landscape">Orizzontale</option>
+                    </select>
                 </div>
                 <div class="control-group">
                     <button onclick="prepareAndPrintStandard()" title="Usa la stampa veloce del browser per la vista attiva.">Stampa Veloce</button>
@@ -1070,24 +1123,48 @@ class FileScannerApp(ctk.CTkFrame):
 
         for folder, items in sorted(grouped_results.items()):
             lines.append(f"\n--- {os.path.basename(folder)} ---")
-            for file_info in items:
-                rel_path = self._get_display_path(file_info)
-                page_count = file_info.get('page_count', 1)
+
+            subfolder_grouped_items = defaultdict(list)
+            for item in items:
+                subfolder_grouped_items[self._get_display_path(item)].append(item)
+            
+            sorted_subfolders = sorted(subfolder_grouped_items.keys(), key=lambda k: (k == ".", k))
+
+            for subfolder in sorted_subfolders:
+                subfolder_items = subfolder_grouped_items[subfolder]
                 
-                if page_count > 1:
-                    lines.append(f"{file_info['filename']}\tMulti-pagina\t{rel_path}")
-                    for i in range(page_count):
-                        page_details = file_info['pages_details'][i]
+                if subfolder != ".":
+                    sub_num_files = len({os.path.join(item['path'], item['filename']) for item in subfolder_items})
+                    sub_total_pages = sum(item.get('page_count', 1) for item in subfolder_items)
+                    sub_total_sqm = sum(pd.get('area_sqm', 0) for item in subfolder_items for pd in item['pages_details'])
+                    sub_total_trim_sqm = sum(pd.get('trim_area_sqm', pd.get('area_sqm', 0)) for item in subfolder_items for pd in item['pages_details'])
+                    
+                    area_text = f"{sub_total_trim_sqm:.2f} m²"
+                    if abs(sub_total_sqm - sub_total_trim_sqm) > 0.0001:
+                        area_text += f" (Orig: {sub_total_sqm:.2f} m²)"
+
+                    stats_line = f"  --- {subfolder} (File: {sub_num_files}, Pagine: {sub_total_pages}, Area: {area_text}) ---"
+                    lines.append(stats_line)
+
+                for file_info in subfolder_items:
+                    rel_path = self._get_display_path(file_info)
+                    page_count = file_info.get('page_count', 1)
+                    prefix = "    " if subfolder != "." else ""
+
+                    if page_count > 1:
+                        lines.append(f"{prefix}{file_info['filename']}\tMulti-pagina\t{rel_path}")
+                        for i in range(page_count):
+                            page_details = file_info['pages_details'][i]
+                            dims_display = page_details['dimensions_cm']
+                            if 'trim_dimensions_cm' in page_details:
+                                dims_display += f" ({page_details['trim_dimensions_cm']})"
+                            lines.append(f"{prefix}  Pagina {i+1}\t{dims_display}\t")
+                    else:
+                        page_details = file_info['pages_details'][0]
                         dims_display = page_details['dimensions_cm']
                         if 'trim_dimensions_cm' in page_details:
                             dims_display += f" ({page_details['trim_dimensions_cm']})"
-                        lines.append(f"  Pagina {i+1}\t{dims_display}\t")
-                else:
-                    page_details = file_info['pages_details'][0]
-                    dims_display = page_details['dimensions_cm']
-                    if 'trim_dimensions_cm' in page_details:
-                        dims_display += f" ({page_details['trim_dimensions_cm']})"
-                    lines.append(f"{file_info['filename']}\t{dims_display}\t{rel_path}")
+                        lines.append(f"{prefix}{file_info['filename']}\t{dims_display}\t{rel_path}")
 
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
         self.status_text.set("Tabella raggruppata copiata negli appunti.")
@@ -1105,18 +1182,42 @@ class FileScannerApp(ctk.CTkFrame):
 
         for folder, pages in sorted(grouped_pages.items()):
             lines.append(f"\n--- {os.path.basename(folder)} ---")
+            
+            subfolder_grouped_pages = defaultdict(list)
             for page_data in pages:
-                item, page_num = page_data['file_info'], page_data['page_num']
-                rel_path = self._get_display_path(item)
-                page_details = item["pages_details"][page_num]
-                page_count = item.get('page_count', 1)
-                
-                filename_display = f"{item['filename']} (Pag. {page_num + 1})" if page_count > 1 else item['filename']
-                dims_display = page_details['dimensions_cm']
-                if 'trim_dimensions_cm' in page_details:
-                    dims_display += f" ({page_details['trim_dimensions_cm']})"
+                subfolder_grouped_pages[self._get_display_path(page_data['file_info'])].append(page_data)
 
-                lines.append(f"{filename_display}\t{dims_display}\t{rel_path}")
+            sorted_subfolders = sorted(subfolder_grouped_pages.keys(), key=lambda k: (k == ".", k))
+
+            for subfolder in sorted_subfolders:
+                subfolder_pages = subfolder_grouped_pages[subfolder]
+
+                if subfolder != ".":
+                    sub_num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in subfolder_pages})
+                    sub_total_pages = len(subfolder_pages)
+                    sub_total_sqm = sum(p['file_info']['pages_details'][p['page_num']].get('area_sqm', 0) for p in subfolder_pages)
+                    sub_total_trim_sqm = sum(p['file_info']['pages_details'][p['page_num']].get('trim_area_sqm', p['file_info']['pages_details'][p['page_num']].get('area_sqm', 0)) for p in subfolder_pages)
+                    
+                    area_text = f"{sub_total_trim_sqm:.2f} m²"
+                    if abs(sub_total_sqm - sub_total_trim_sqm) > 0.0001:
+                        area_text += f" (Orig: {sub_total_sqm:.2f} m²)"
+                    
+                    stats_line = f"  --- {subfolder} (File: {sub_num_files}, Pagine: {sub_total_pages}, Area: {area_text}) ---"
+                    lines.append(stats_line)
+
+                for page_data in subfolder_pages:
+                    item, page_num = page_data['file_info'], page_data['page_num']
+                    rel_path = self._get_display_path(item)
+                    page_details = item["pages_details"][page_num]
+                    page_count = item.get('page_count', 1)
+                    prefix = "    " if subfolder != "." else ""
+                    
+                    filename_display = f"{item['filename']} (Pag. {page_num + 1})" if page_count > 1 else item['filename']
+                    dims_display = page_details['dimensions_cm']
+                    if 'trim_dimensions_cm' in page_details:
+                        dims_display += f" ({page_details['trim_dimensions_cm']})"
+
+                    lines.append(f"{prefix}{filename_display}\t{dims_display}\t{rel_path}")
 
         self.clipboard_clear(); self.clipboard_append("\n".join(lines))
         self.status_text.set(f"Selezione raggruppata copiata ({len(selected_pages)} righe).")
@@ -1125,7 +1226,7 @@ class FileScannerApp(ctk.CTkFrame):
         pages_to_print = self.get_pages_for_selection(selection_mode)
         if not pages_to_print: return messagebox.showinfo("Informazione", "Nessuna riga da stampare.", parent=self)
         html_string = self._generate_html_table_with_totals(pages_to_print)
-        html_content = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Stampa Tabella</title><style>@media print{{@page{{margin:1.5cm}}body{{font-family:sans-serif;-webkit-print-color-adjust:exact}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid black;padding:5px;text-align:left}}th{{background-color:#e0e0e0!important}}tfoot{{background-color:#f0f0f0!important;font-weight:bold}}}}</style></head><body onload="window.print()">{html_string}</body></html>"""
+        html_content = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Stampa Tabella</title><style>@media print{{@page{{margin:1.5cm}}body{{font-family:sans-serif;-webkit-print-color-adjust:exact}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid black;padding:5px;text-align:left}}th{{background-color:#e0e0e0!important}}tfoot{{display:none;}}}}</style></head><body onload="window.print()">{html_string}</body></html>"""
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
                 f.write(html_content)
@@ -1218,39 +1319,70 @@ class FileScannerApp(ctk.CTkFrame):
         for folder, pages in sorted(grouped_pages.items()):
             folder_html = f'<tr style="background-color: #f0f0f0; font-weight: bold;"><td colspan="4" style="padding: 5px; border-left: 3px solid #4285f4;">{html.escape(os.path.basename(folder))}</td></tr>'
             html_string += folder_html
-            
+
+            subfolder_grouped_pages = defaultdict(list)
             for page_data in pages:
-                file_info, page_num = page_data['file_info'], page_data['page_num']
-                page_details = file_info["pages_details"][page_num]
-                page_count = file_info.get('page_count', 1)
-                filename_display = f"{file_info['filename']} (Pag. {page_num + 1})" if page_count > 1 else file_info['filename']
-                
-                dims_display = page_details["dimensions_cm"]
-                if 'trim_dimensions_cm' in page_details:
-                    dims_display += f"<br><small style='color:red;'>Al vivo: {page_details['trim_dimensions_cm']}</small>"
-                    has_trim_box = True
+                subfolder_grouped_pages[self._get_display_path(page_data['file_info'])].append(page_data)
 
-                area_sqm = page_details.get('area_sqm', 0)
-                trim_area_sqm = page_details.get('trim_area_sqm', area_sqm)
-                total_area += area_sqm
-                total_trim_area += trim_area_sqm
-                
-                area_display = f"{area_sqm:.4f}"
-                if 'trim_area_sqm' in page_details:
-                    area_display = f"{trim_area_sqm:.4f}"
+            sorted_subfolders = sorted(subfolder_grouped_pages.keys(), key=lambda k: (k == ".", k))
 
-                path_display = self._get_display_path(file_info)
-                html_string += f'<tr><td style="padding:5px">{html.escape(filename_display)}</td><td style="padding:5px">{dims_display}</td><td style="padding:5px">{html.escape(path_display)}</td><td style="padding:5px">{area_display}</td></tr>'
+            for subfolder in sorted_subfolders:
+                subfolder_pages = subfolder_grouped_pages[subfolder]
+
+                if subfolder != ".":
+                    sub_num_files = len({(p['file_info']['path'], p['file_info']['filename']) for p in subfolder_pages})
+                    sub_total_pages = len(subfolder_pages)
+                    sub_total_area = sum(p['file_info']['pages_details'][p['page_num']].get('area_sqm', 0) for p in subfolder_pages)
+                    sub_total_trim_area = sum(p['file_info']['pages_details'][p['page_num']].get('trim_area_sqm', p['file_info']['pages_details'][p['page_num']].get('area_sqm', 0)) for p in subfolder_pages)
+                    
+                    sub_area_text = f"{sub_total_trim_area:.4f} m²"
+                    if abs(sub_total_area - sub_total_trim_area) > 0.0001:
+                        sub_area_text += f" (Orig: {sub_total_area:.4f} m²)"
+
+                    stats_text = f"File: {sub_num_files} | Pagine: {sub_total_pages} | Area: {sub_area_text}"
+                    subfolder_header_html = f'<tr style="background-color: #fafafa;"><td colspan="4" style="padding: 4px 10px; font-weight: bold; color: #333; border-bottom: 1px solid #ddd; border-top: 1px solid #ddd;">{html.escape(subfolder)}: <span style="font-weight:normal; color:#555">{stats_text}</span></td></tr>'
+                    html_string += subfolder_header_html
                 
+                for page_data in subfolder_pages:
+                    file_info, page_num = page_data['file_info'], page_data['page_num']
+                    page_details = file_info["pages_details"][page_num]
+                    page_count = file_info.get('page_count', 1)
+                    filename_display = f"{file_info['filename']} (Pag. {page_num + 1})" if page_count > 1 else file_info['filename']
+                    
+                    dims_display = page_details["dimensions_cm"]
+                    if 'trim_dimensions_cm' in page_details:
+                        dims_display += f"<br><small style='color:red;'>Al vivo: {page_details['trim_dimensions_cm']}</small>"
+                        has_trim_box = True
+
+                    area_sqm = page_details.get('area_sqm', 0)
+                    trim_area_sqm = page_details.get('trim_area_sqm', area_sqm)
+                    total_area += area_sqm
+                    total_trim_area += trim_area_sqm
+                    
+                    area_display = f"{area_sqm:.4f}"
+                    if 'trim_area_sqm' in page_details:
+                        area_display = f"{trim_area_sqm:.4f}"
+
+                    path_display = self._get_display_path(file_info)
+                    html_string += f'<tr><td style="padding:5px">{html.escape(filename_display)}</td><td style="padding:5px">{dims_display}</td><td style="padding:5px">{html.escape(path_display)}</td><td style="padding:5px">{area_display}</td></tr>'
+                    
         html_string += '</tbody>'
+        html_string += '</table>'
+        
         if include_headers_footers:
             total_text = f"Totale ({len(pages_to_export)} elementi)"
             area_text = f"{total_trim_area:.4f} m²"
             if has_trim_box and abs(total_area - total_trim_area) > 0.0001:
                 area_text += f"<br><small>(Originale: {total_area:.4f} m²)</small>"
 
-            html_string += f'<tfoot><tr style="font-weight: bold; background-color: #f0f0f0;"><td style="padding: 5px;" colspan="3">{total_text}</td><td style="padding: 5px;">{area_text}</td></tr></tfoot>'
-        html_string += '</table>'
+            html_string += f'''
+            <table style="width: 100%; border-collapse: collapse; margin-top: 20px; page-break-inside: avoid;">
+                <tr style="font-weight: bold; background-color: #f0f0f0;">
+                    <td style="padding: 5px; border: 1px solid black;" colspan="3">{total_text}</td>
+                    <td style="padding: 5px; border: 1px solid black;">{area_text}</td>
+                </tr>
+            </table>
+            '''
         return html_string
 
     def _set_clipboard_html(self, html_fragment: str):
