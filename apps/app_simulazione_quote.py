@@ -1,5 +1,5 @@
 # app_simulazione_quote.py
-# Versione: 2.1 (7-Set-2025)
+# Versione: 2.2 (7-Set-2025)
 
 # --- Dipendenze Richieste ---
 # Per funzionare, questa app richiede le seguenti librerie.
@@ -69,7 +69,7 @@ class QuoteSimulatorApp(ctk.CTkFrame):
         # Dati temporanei per la UI
         self.perspective_points = []
         self.selected_point_index = None
-        self.is_drawing_line = False # --- NUOVO: Stato unificato per disegno linea
+        self.is_drawing_line = False 
         
         # --- Stato per il ritaglio ---
         self.is_cropping = False
@@ -112,7 +112,6 @@ class QuoteSimulatorApp(ctk.CTkFrame):
         self._bind_events()
 
     def _create_toolbar_buttons(self):
-        # --- MODIFICATO: Semplificata la toolbar ---
         buttons_config = [
             ("Carica File", self._load_image_dialog),
             ("Apri Progetto", self._open_project),
@@ -120,7 +119,7 @@ class QuoteSimulatorApp(ctk.CTkFrame):
             ("---", None),
             ("Correggi Prospettiva", lambda: self._set_mode("perspective")),
             ("Ritaglia Immagine", lambda: self._set_mode("crop")),
-            ("Quota", lambda: self._set_mode("quote")), # --- NUOVO: Pulsante Unico ---
+            ("Quota", lambda: self._set_mode("quote")), 
             ("---", None),
             ("Ripristina Immagine", self._reset_image),
             ("Elimina Quote", self._delete_all_measurements),
@@ -192,7 +191,6 @@ class QuoteSimulatorApp(ctk.CTkFrame):
         
         if mode == "perspective": self.perspective_points = []; self.status_label.configure(text="Modalità: Prospettiva\n(Clicca 4 angoli)")
         elif mode == "crop": self.crop_rect_points = []; self.status_label.configure(text="Modalità: Ritaglia\n(Trascina per selezionare l'area)")
-        # --- NUOVO: Logica di stato per la modalità Quota ---
         elif mode == "quote":
              self.is_drawing_line = False
              self.canvas.delete("temp_line")
@@ -206,7 +204,6 @@ class QuoteSimulatorApp(ctk.CTkFrame):
         if self.current_mode == "perspective":
             if self.selected_point_index is not None: return
             self._handle_perspective_click(event)
-        # --- NUOVO: Gestione unificata del click ---
         elif self.current_mode == "quote": self._handle_quote_click(event)
         elif self.current_mode == "crop": 
             if not self.is_cropping and not self.crop_rect_points:
@@ -368,7 +365,6 @@ class QuoteSimulatorApp(ctk.CTkFrame):
         self.original_pil_image = cropped_image
         self._reset_all_but_image(); self._fit_image_to_view()
 
-    # --- NUOVA FUNZIONE UNIFICATA per la modalità QUOTA ---
     def _handle_quote_click(self, event):
         if not self.is_drawing_line:
             self.is_drawing_line = True
@@ -388,12 +384,10 @@ class QuoteSimulatorApp(ctk.CTkFrame):
             p2_img = self._canvas_to_image_coords(p2_canvas)
 
             if self.calibration_mode:
-                # Se siamo già calibrati, prendi una misura
                 distance = self._calculate_distance(p1_img, p2_img)
                 self.measurements.append({"p1_img": list(p1_img), "p2_img": list(p2_img), "distance": distance})
                 self._redraw_canvas()
             else:
-                # Se non siamo calibrati, questa linea imposta la scala
                 self._ask_scale_dimension(p1_img, p2_img)
 
     def _ask_scale_dimension(self, p1_img, p2_img):
@@ -416,7 +410,10 @@ class QuoteSimulatorApp(ctk.CTkFrame):
                         self.status_label.configure(text="Modalità: Quota\n(Traccia una linea di riferimento per l'altezza)")
                     else:
                         self.calibration_mode = 'simple_scale'
-                        self._set_mode('quote') # Aggiorna lo stato
+                        self._set_mode('quote')
+                else:
+                    self.calibration_mode = 'simple_scale'
+                    self._set_mode('quote')
             else: # Verticale
                 self.scale_ratio_y = real_dist / dy_pix if dy_pix != 0 else float('inf')
                 self.measurements = [m for m in self.measurements if not m.get("is_scale_ref_y")]
@@ -427,12 +424,10 @@ class QuoteSimulatorApp(ctk.CTkFrame):
                          self.status_label.configure(text="Modalità: Quota\n(Traccia una linea di riferimento per la larghezza)")
                     else:
                         self.calibration_mode = 'simple_scale'
-                        self._set_mode('quote') # Aggiorna lo stato
-            
-            # Se è la seconda calibrazione o l'utente ha detto no alla prima
-            if not is_first_ref or not self.calibration_mode:
-                self.calibration_mode = 'simple_scale'
-                self._set_mode('quote')
+                        self._set_mode('quote')
+                else:
+                    self.calibration_mode = 'simple_scale'
+                    self._set_mode('quote')
             
             self._recalculate_all_distances()
             self._redraw_canvas()
