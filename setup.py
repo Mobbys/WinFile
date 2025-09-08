@@ -1,5 +1,6 @@
 import sys
 from cx_Freeze import setup, Executable
+import matplotlib # Importato per trovare la sua cartella dati
 
 # --- Dati dell'applicazione ---
 APP_NAME = "WinFile"
@@ -22,10 +23,12 @@ packages = [
     "matplotlib"
 ]
 
-# File e cartelle da includere nella build finale.
+# --- NUOVO: Trova e include automaticamente la cartella dati di matplotlib ---
+matplotlib_data_path = matplotlib.get_data_path()
 include_files = [
     ('apps', 'apps'),
-    ('config.json', 'config.json')
+    ('config.json', 'config.json'),
+    (matplotlib_data_path, 'mpl-data') # Copia la cartella dati nella root della build
 ]
 
 # --- Configurazione per l'eseguibile ---
@@ -41,9 +44,9 @@ build_dir_name = f"build/{APP_NAME} {APP_VERSION}"
 # Opzioni di compilazione pulite e standard.
 build_exe_options = {
     "packages": packages,
+    "includes": ["matplotlib.backends.backend_tkagg"],
     "include_files": include_files,
     "include_msvcr": True, # Include le librerie C++ ridistribuibili
-    # Specifica la cartella di output personalizzata
     "build_exe": build_dir_name
 }
 
@@ -59,3 +62,4 @@ setup(
         icon="icona.ico"
     )]
 )
+
