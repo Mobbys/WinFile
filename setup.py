@@ -3,7 +3,7 @@ from cx_Freeze import setup, Executable
 
 # --- Dati dell'applicazione ---
 APP_NAME = "WinFile"
-APP_VERSION = "3.8"
+APP_VERSION = "4.0"
 
 # --- Opzioni di Base ---
 # Queste sono le librerie che il tuo programma usa.
@@ -15,7 +15,11 @@ packages = [
     "reportlab",
     "requests",
     "packaging",
-    "tkinter" # Aggiungiamo tkinter esplicitamente per sicurezza
+    "tkinter", # Aggiungiamo tkinter esplicitamente per sicurezza
+    "numpy",
+    "cv2",
+    "ezdxf",
+    "matplotlib"
 ]
 
 # File e cartelle da includere nella build finale.
@@ -30,7 +34,7 @@ if sys.platform == "win32":
     base = "Win32GUI" # Nasconde la finestra del terminale all'avvio
 
 # --- Costruisci il nome della cartella di output ---
-# Questa riga crea una stringa tipo "build/WinFile 3.4"
+# Questa riga crea una stringa tipo "build/WinFile 4.0"
 build_dir_name = f"build/{APP_NAME} {APP_VERSION}"
 
 

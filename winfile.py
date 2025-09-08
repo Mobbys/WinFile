@@ -19,7 +19,7 @@ import sys # Aggiunto per ottenere il percorso dell'eseguibile
 
 # --- CONFIGURAZIONE AGGIORNAMENTI ---
 GITHUB_REPO = "Mobbys/WinFile" 
-CURRENT_VERSION = "3.8" # Questa deve corrispondere alla versione nel setup.py
+CURRENT_VERSION = "4.0" # Questa deve corrispondere alla versione nel setup.py
 
 # Il repository è pubblico, quindi non è necessario un token di accesso.
 
