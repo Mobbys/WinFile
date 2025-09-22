@@ -3,7 +3,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
 import threading
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk
 import fitz  # PyMuPDF
 import io
 from collections import defaultdict
@@ -29,7 +29,7 @@ from reportlab.lib.pagesizes import A4, landscape
 Image.MAX_IMAGE_PIXELS = None
 
 # --- COSTANTI ---
-
+SUPPORTED_EXTENSIONS = ('.jpg', '.jpeg', '.tif', '.tiff', '.pdf', '.ai', '.png')
 DEFAULT_DPI = 96
 PREVIEW_SIZE = (300, 300)
 
@@ -325,9 +325,6 @@ class FileScannerApp(ctk.CTkFrame):
                 except Exception:
                     details.update({"type": "AI (Non compatibile)" if ext == '.ai' else "PDF (Danneggiato)", "page_count": 1, "pages_details": [{"dimensions_cm": "Non rilevabili", "width_cm": 0, "height_cm": 0, "area_sqm": 0}]})
                     return details
-            else:
-                details.update({"page_count": 1, "pages_details": [{"dimensions_cm": "Anteprima non disponibile", "width_cm": 0, "height_cm": 0, "area_sqm": 0}], "type": "NON SUPPORTATO"})
-                return details
         except Exception as e:
             print(f"Errore analisi file {file_path}: {e}")
             return {"filename": os.path.basename(file_path), "type": "ERRORE", "path": os.path.dirname(file_path), "page_count": 1, "pages_details": [{"dimensions_cm": "Errore lettura", "width_cm": 0, "height_cm": 0, "area_sqm": 0}]}
@@ -344,11 +341,12 @@ class FileScannerApp(ctk.CTkFrame):
                 for root_dir, _, files in os.walk(scan_root):
                     self.after(0, self.update_scan_progress, root_dir, len(found_files))
                     for file in files:
-                        full_path = os.path.join(root_dir, file)
-                        if details := self.get_file_details(full_path):
-                            details['scan_root'] = scan_root
-                            found_files.append(details)
-            elif os.path.isfile(scan_root):
+                        if file.lower().endswith(SUPPORTED_EXTENSIONS):
+                            full_path = os.path.join(root_dir, file)
+                            if details := self.get_file_details(full_path):
+                                details['scan_root'] = scan_root
+                                found_files.append(details)
+            elif os.path.isfile(scan_root) and scan_root.lower().endswith(SUPPORTED_EXTENSIONS):
                 if details := self.get_file_details(scan_root):
                     details['scan_root'] = os.path.dirname(scan_root)
                     found_files.append(details)
@@ -485,16 +483,6 @@ class FileScannerApp(ctk.CTkFrame):
         self.preview_label.configure(image=None)
         self._unlock_ui()
 
-    def _create_placeholder_image(self, size, text):
-        img = Image.new('RGB', size, color = (200, 200, 200))
-        d = ImageDraw.Draw(img)
-        try:
-            font = ctk.CTkFont(family="Arial", size=20)
-            d.text((10,10), text, fill=(0,0,0), font=font)
-        except:
-            d.text((10,10), text, fill=(0,0,0))
-        return img
-
     def on_item_select(self, event):
         if not (sel := self.tree.selection()): return
         selected_data, page_to_show = self._find_item_data_by_id(sel[0])
@@ -502,30 +490,18 @@ class FileScannerApp(ctk.CTkFrame):
             self.preview_label.configure(image=None)
             return
         full_path = os.path.join(selected_data['path'], selected_data['filename'])
-        
-        if selected_data['type'] == "NON SUPPORTATO":
-            img = self._create_placeholder_image(PREVIEW_SIZE, "Anteprima non disponibile")
-            self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-            self.preview_label.configure(image=self.preview_image)
-            return
-
         try:
             if selected_data['type'] in ('PDF', 'AI'):
                 with fitz.open(full_path) as doc:
                     pix = doc.load_page(page_to_show).get_pixmap()
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            else: 
-                img = Image.open(full_path)
-
+            else: img = Image.open(full_path)
             img.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
             self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.preview_label.configure(image=self.preview_image)
         except Exception as e:
             self.status_text.set(f"Impossibile generare anteprima.")
-            print(f"Errore anteprima: {e}")
-            img = self._create_placeholder_image(PREVIEW_SIZE, "Anteprima non disponibile")
-            self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-            self.preview_label.configure(image=self.preview_image)
+            print(f"Errore anteprima: {e}"); self.preview_label.configure(image=None)
 
     def open_selected_file(self, event):
         if not (focus_id := self.tree.focus()): return
@@ -682,7 +658,7 @@ class FileScannerApp(ctk.CTkFrame):
             
             .page-content.grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--item-width), 1fr)); gap: 10px; align-content: start; }
             .page-content.list-layout { display: flex; flex-direction: column; gap: 8px; flex-wrap: nowrap; }
-            .page-content.page-layout { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+            .page-content.page-layout { display: flex; flex-wrap: wrap; gap: 5px; align-content: start; }
             
             .item {box-sizing: border-box; background-color:#fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: grab; display: flex; flex-direction: column; position: relative;}
             .item.sortable-ghost {opacity: 0.4;}
@@ -807,14 +783,7 @@ class FileScannerApp(ctk.CTkFrame):
             }
 
             function changeSize(amount) {
-                state.itemWidth = Math.max(100, Math.min(1600, state.itemWidth + amount * 25));
-                document.getElementById('zoom-slider').value = state.itemWidth;
-                document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
-                renderAllPages();
-            }
-
-            function setZoom(value) {
-                state.itemWidth = parseInt(value, 10);
+                state.itemWidth = Math.max(100, Math.min(800, state.itemWidth + amount * 25));
                 document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
                 renderAllPages();
             }
@@ -984,7 +953,6 @@ class FileScannerApp(ctk.CTkFrame):
             document.addEventListener("DOMContentLoaded", () => {
                 let itemCounter = 0;
                 document.querySelectorAll('.item').forEach(item => item.id = `item-${itemCounter++}`);
-                document.getElementById('zoom-slider').value = state.itemWidth;
                 updatePageLayout(); // Chiamata iniziale
                 switchView('grid');
             });
@@ -1055,12 +1023,7 @@ class FileScannerApp(ctk.CTkFrame):
                 
                 try:
                     img_data = b""
-                    if item_data['type'] == "NON SUPPORTATO":
-                        img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
-                        img_buffer = io.BytesIO()
-                        img.save(img_buffer, format='PNG')
-                        img_data = img_buffer.getvalue()
-                    elif item_data['type'] in ('PDF', 'AI'):
+                    if item_data['type'] in ('PDF', 'AI'):
                         with fitz.open(full_path) as doc_pdf:
                             img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=150).tobytes("png")
                     else:
@@ -1097,25 +1060,7 @@ class FileScannerApp(ctk.CTkFrame):
                         <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
                     </div>"""
 
-                except Exception as e: 
-                    print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
-                    img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
-                    img_buffer = io.BytesIO()
-                    img.save(img_buffer, format='PNG')
-                    img_data = img_buffer.getvalue()
-                    b64_img = base64.b64encode(img_data).decode('utf-8')
-                    img_src = f"data:image/png;base64,{b64_img}"
-                    source_html += f"""<div class="item" data-folder-id="{folder_id}">
-                        <input type="checkbox" class="item-checkbox" checked>
-                        <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima non disponibile"></div>
-                        <div class="item-info">
-                            <div class="item-info-header">
-                                <span class="filename">{html.escape(item_data["filename"])}</span>
-                            </div>
-                            <div class="metadata">Anteprima non disponibile</div>
-                        </div>
-                        <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
-                    </div>"""
+                except Exception as e: print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
             source_html += '</div>'
 
         body = f"""<body>
@@ -1150,7 +1095,6 @@ class FileScannerApp(ctk.CTkFrame):
                     <input type="text" id="search-box" onkeyup="filterFiles()" placeholder="Cerca per nome file...">
                     <label>Dimensione:</label>
                     <button onclick="changeSize(-1)" title="Rimpicciolisci">-</button>
-                    <input type="range" id="zoom-slider" min="100" max="1600" value="200" oninput="setZoom(this.value)">
                     <button onclick="changeSize(1)" title="Ingrandisci">+</button>
                 </div>
                 <div class="control-group" style="margin-left: auto;">
@@ -1617,3 +1561,5 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
+
+
