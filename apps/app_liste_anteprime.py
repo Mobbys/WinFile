@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.7.0 (Breadcrumbs)
+# app_liste_anteprime.py - v4.9.3 (Generazione Parallela)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -14,6 +14,7 @@ import base64
 import csv
 import html
 import functools
+from concurrent.futures import ThreadPoolExecutor
 
 # Import per la gestione avanzata degli appunti su Windows
 import ctypes
@@ -366,7 +367,6 @@ class FileScannerApp(ctk.CTkFrame):
         else: self.repopulate_treeview()
 
     def _get_display_path(self, file_info):
-        # --- MODIFICA INIZIO: Percorso a briciole di pane ---
         scan_root = file_info.get('scan_root', '')
         file_dir = file_info['path']
         
@@ -374,14 +374,10 @@ class FileScannerApp(ctk.CTkFrame):
             return "."
         
         try:
-            # Calcola il percorso relativo
             relative_path = os.path.relpath(file_dir, scan_root)
-            # Sostituisce il separatore di sistema con " > "
             return relative_path.replace(os.path.sep, ' > ')
         except ValueError:
-            # Fallback nel caso in cui le cartelle siano su drive diversi (es. C: e D:)
             return os.path.basename(file_dir)
-        # --- MODIFICA FINE ---
 
     def repopulate_treeview(self):
         selection = self.tree.selection()
@@ -607,14 +603,19 @@ class FileScannerApp(ctk.CTkFrame):
         pages_to_export = self.get_pages_for_selection(selection_mode)
         if not pages_to_export:
             return messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
+        
+        # --- MODIFICA INIZIO: Rimosso dialogo, impostata qualità "fast" di default ---
+        quality = 'fast'
+        # --- MODIFICA FINE ---
+
         self._lock_ui()
         self.status_text.set("Preparazione anteprima miniature...")
         self.update_idletasks()
-        threading.Thread(target=self._build_html_thread, args=(pages_to_export,), daemon=True).start()
+        threading.Thread(target=self._build_html_thread, args=(pages_to_export, quality), daemon=True).start()
 
-    def _build_html_thread(self, pages_to_export):
+    def _build_html_thread(self, pages_to_export, quality):
         try:
-            html_content = self._generate_html_content(pages_to_export)
+            html_content = self._generate_html_content(pages_to_export, quality)
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
                 temp_file_path = f.name
                 f.write(html_content)
@@ -637,7 +638,38 @@ class FileScannerApp(ctk.CTkFrame):
         self._unlock_ui(); self.update()
         messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\n{e}", parent=self)
 
-    def _generate_html_content(self, pages_to_export):
+    # --- MODIFICA INIZIO: Funzione helper per la generazione parallela di una miniatura ---
+    def _generate_single_thumbnail(self, task_args):
+        page_data, pdf_dpi, img_thumb_size = task_args
+        item_data, page_num = page_data['file_info'], page_data['page_num']
+        full_path = os.path.join(item_data['path'], item_data['filename'])
+
+        try:
+            img_data = b""
+            if item_data['type'] == "NON SUPPORTATO":
+                img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format='PNG')
+                img_data = img_buffer.getvalue()
+            elif item_data['type'] in ('PDF', 'AI'):
+                with fitz.open(full_path) as doc_pdf:
+                    img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=pdf_dpi).tobytes("png")
+            else:
+                with Image.open(full_path) as img:
+                    img.thumbnail(img_thumb_size); img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
+            
+            return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
+        except Exception as e:
+            print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
+            img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format='PNG')
+            img_data = img_buffer.getvalue()
+            return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
+    # --- MODIFICA FINE ---
+
+    def _generate_html_content(self, pages_to_export, quality):
         grouped_pages = defaultdict(list)
         selected_pages_keys = {(os.path.join(p['file_info']['path'], p['file_info']['filename']), p['page_num']) for p in pages_to_export}
         
@@ -655,6 +687,13 @@ class FileScannerApp(ctk.CTkFrame):
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         """
+        
+        if quality == 'fast':
+            pdf_dpi = 72
+            img_thumb_size = (300, 300)
+        else: # high quality
+            pdf_dpi = 150
+            img_thumb_size = (600, 600)
 
         css = """<style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
@@ -683,11 +722,9 @@ class FileScannerApp(ctk.CTkFrame):
 
             .subfolder-separator-container { width: 100%; display: flex; align-items: center; gap: 10px; margin: 15px 0 5px 0; }
             .subfolder-separator { flex-grow: 1; border: 0; border-top: 1px solid #ccc; }
-            /* --- MODIFICA INIZIO: Stili per Breadcrumbs --- */
             .breadcrumb-container { display: flex; align-items: center; gap: 5px; }
             .breadcrumb-crumb { padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .breadcrumb-separator { font-weight: bold; color: #555; }
-            /* --- MODIFICA FINE --- */
             .subfolder-stats { font-size: 0.8em; color: #666; white-space: nowrap; }
             
             .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation, .page-content.page-layout .subfolder-separator-container { flex-basis: 100%; }
@@ -703,12 +740,30 @@ class FileScannerApp(ctk.CTkFrame):
             .item.sortable-ghost {opacity: 0.4;}
             .item-img-container { width: 100%; background-color: #fff; display: flex; align-items: center; justify-content: center; border-bottom:1px solid #ccc; }
             .item-img{display:block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #000; box-sizing: border-box;}
-            .item-info{padding: 8px; font-size: 12px; text-align: left; background: #f8f9fa; width:100%; box-sizing: border-box;}
-            .item-info-header{display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;}
-            .filename{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;color:#212529; flex-grow: 1; padding-right: 5px;}
-            .metadata{font-size: 11px; color: #6c757d;}
+            
+            .item-info {
+                padding: 8px; font-size: 12px; text-align: left; background: #f8f9fa; 
+                width: 100%; box-sizing: border-box;
+                display: flex; flex-direction: column;
+                flex-grow: 1;
+            }
+            .item-info-header { 
+                display: flex; justify-content: flex-end;
+                width: 100%;
+                order: 3;
+                margin-top: 4px;
+            }
+            .metadata { font-size: 11px; color: #6c757d; order: 1; }
+            .filename-container {
+                margin-top: 5px;
+                border-top: 1px solid #eee;
+                padding-top: 5px;
+                order: 2;
+            }
+            .filename { font-weight: 700; color: #212529; word-break: break-word; }
             .trim-info{font-size: 10px; color: #d9534f; font-weight: bold;}
             .page-indicator{font-size:.8em;color:#fff;padding:2px 5px;border-radius:3px; text-shadow: 1px 1px 2px #000; flex-shrink: 0; font-weight: bold;}
+
             .item-checkbox {position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; z-index: 10; cursor: pointer; background-color: rgba(255,255,255,0.7); border-radius: 3px;}
             
             .page-content.page-layout .item { width: var(--item-width); }
@@ -1028,121 +1083,91 @@ class FileScannerApp(ctk.CTkFrame):
                 </div>
                 <textarea class="annotation-area folder-annotation" id="anno-{folder_id}" placeholder="Annotazione cartella..."></textarea>"""
             
-            # Pre-calcola le statistiche per ogni sottocartella
-            subfolder_stats = defaultdict(lambda: {'files': set(), 'pages': 0, 'sqm': 0, 'trim_sqm': 0})
+            section_stats = defaultdict(lambda: {'files': set(), 'pages': 0, 'sqm': 0, 'trim_sqm': 0})
             for page_data in pages:
-                subfolder = self._get_display_path(page_data['file_info'])
-                if subfolder == ".": continue
-                stats = subfolder_stats[subfolder]
+                section_key = self._get_display_path(page_data['file_info'])
+                stats = section_stats[section_key]
                 stats['files'].add(os.path.join(page_data['file_info']['path'], page_data['file_info']['filename']))
                 stats['pages'] += 1
                 page_details = page_data['file_info']['pages_details'][page_data['page_num']]
                 stats['sqm'] += page_details.get('area_sqm', 0)
                 stats['trim_sqm'] += page_details.get('trim_area_sqm', page_details.get('area_sqm', 0))
             
-            # Ordina le pagine per sottocartella e inserisce i separatori
-            pages.sort(key=lambda p: (self._get_display_path(p['file_info']) == ".", self._get_display_path(p['file_info'])))
-            last_subfolder = None
+            pages.sort(key=lambda p: (self._get_display_path(p['file_info']) != ".", self._get_display_path(p['file_info'])))
             
-            for page_data in pages:
-                current_subfolder = self._get_display_path(page_data['file_info'])
-                if current_subfolder != last_subfolder and current_subfolder != ".":
-                    # --- MODIFICA INIZIO: Generazione Breadcrumbs HTML ---
-                    stats = subfolder_stats[current_subfolder]
-                    num_files = len(stats['files'])
-                    total_pages = stats['pages']
-                    total_sqm = stats['sqm']
-                    total_trim_sqm = stats['trim_sqm']
-                    
-                    stats_text = f"File: {num_files} | Pagine: {total_pages} | Area: {total_sqm:.2f} m²"
-                    if abs(total_sqm - total_trim_sqm) > 0.0001:
-                        stats_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
+            # --- MODIFICA INIZIO: Generazione parallela delle miniature ---
+            tasks = [(p, pdf_dpi, img_thumb_size) for p in pages]
+            with ThreadPoolExecutor() as executor:
+                b64_images = list(executor.map(self._generate_single_thumbnail, tasks))
+            # --- MODIFICA FINE ---
 
-                    breadcrumb_html = '<div class="breadcrumb-container">'
-                    crumbs = current_subfolder.split(' > ')
-                    breadcrumb_colors = ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0', '#9013FE']
-                    for i, crumb in enumerate(crumbs):
-                        color = breadcrumb_colors[i % len(breadcrumb_colors)]
-                        breadcrumb_html += f'<span class="breadcrumb-crumb" style="background-color: {color};">{html.escape(crumb)}</span>'
-                        if i < len(crumbs) - 1:
-                            breadcrumb_html += '<span class="breadcrumb-separator">&gt;</span>'
-                    breadcrumb_html += '</div>'
+            last_subfolder = None
+            for i, page_data in enumerate(pages):
+                current_subfolder = self._get_display_path(page_data['file_info'])
+                
+                if current_subfolder != last_subfolder:
+                    stats = section_stats[current_subfolder]
+                    num_files_sec = len(stats['files'])
+                    total_pages_sec = stats['pages']
+                    total_sqm_sec = stats['sqm']
+                    total_trim_sqm_sec = stats['trim_sqm']
+                    
+                    stats_text = f"File: {num_files_sec} | Pagine: {total_pages_sec} | Area: {total_sqm_sec:.2f} m²"
+                    if abs(total_sqm_sec - total_trim_sqm_sec) > 0.0001:
+                        stats_text += f" (Al vivo: {total_trim_sqm_sec:.2f} m²)"
+
+                    header_content = ''
+                    if current_subfolder == ".":
+                        header_content = '<div class="breadcrumb-container"><span class="breadcrumb-crumb" style="background-color: #6c757d;">File nella cartella principale</span></div>'
+                    else:
+                        header_content = '<div class="breadcrumb-container">'
+                        crumbs = current_subfolder.split(' > ')
+                        breadcrumb_colors = ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0', '#9013FE']
+                        for j, crumb in enumerate(crumbs):
+                            color = breadcrumb_colors[j % len(breadcrumb_colors)]
+                            header_content += f'<span class="breadcrumb-crumb" style="background-color: {color};">{html.escape(crumb)}</span>'
+                            if j < len(crumbs) - 1:
+                                header_content += '<span class="breadcrumb-separator">&gt;</span>'
+                        header_content += '</div>'
 
                     source_html += f'''<div class="subfolder-separator-container">
-                        {breadcrumb_html}
+                        {header_content}
                         <hr class="subfolder-separator">
                         <span class="subfolder-stats">{stats_text}</span>
                     </div>'''
-                    # --- MODIFICA FINE ---
-                last_subfolder = current_subfolder
+                    last_subfolder = current_subfolder
 
                 item_data, page_num = page_data['file_info'], page_data['page_num']
                 full_path = os.path.join(item_data['path'], item_data['filename'])
                 page_details = item_data["pages_details"][page_num]
                 
-                try:
-                    img_data = b""
-                    if item_data['type'] == "NON SUPPORTATO":
-                        img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
-                        img_buffer = io.BytesIO()
-                        img.save(img_buffer, format='PNG')
-                        img_data = img_buffer.getvalue()
-                    elif item_data['type'] in ('PDF', 'AI'):
-                        with fitz.open(full_path) as doc_pdf:
-                            img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=150).tobytes("png")
-                    else:
-                        with Image.open(full_path) as img:
-                            img.thumbnail((600, 600)); img_buffer = io.BytesIO()
-                            img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
-                    
-                    b64_img = base64.b64encode(img_data).decode('utf-8')
-                    img_src = f"data:image/png;base64,{b64_img}"
-                    
-                    page_count = item_data.get('page_count', 1)
-                    current_color = file_path_to_color.get(full_path, '#808080')
-                    
-                    area_sqm_val = page_details.get('area_sqm', 0)
-                    trim_area_sqm_val = page_details.get('trim_area_sqm', area_sqm_val)
-                    
-                    dims_html = f'<span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span>'
-                    trim_html = ''
-                    if 'trim_dimensions_cm' in page_details:
-                        trim_html = f'<div class="trim-info">Al vivo: {page_details["trim_dimensions_cm"]} cm &nbsp; {trim_area_sqm_val:.3f} m²</div>'
-                    
-                    page_indicator_span = f'<span class="page-indicator" style="--bg-color: {current_color}; background-color: {current_color};">Pag. {page_num + 1}/{page_count}</span>' if page_count > 1 else ''
-                    
-                    source_html += f"""<div class="item" data-folder-id="{folder_id}">
-                        <input type="checkbox" class="item-checkbox" checked>
-                        <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima"></div>
-                        <div class="item-info">
-                            <div class="item-info-header">
-                                <span class="filename">{html.escape(item_data["filename"])}</span>
-                                {page_indicator_span}
-                            </div>
-                            <div class="metadata">{dims_html}{trim_html}</div>
+                img_src = b64_images[i]
+                
+                page_count = item_data.get('page_count', 1)
+                current_color = file_path_to_color.get(full_path, '#808080')
+                
+                area_sqm_val = page_details.get('area_sqm', 0)
+                trim_area_sqm_val = page_details.get('trim_area_sqm', area_sqm_val)
+                
+                dims_html = f'<span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span>'
+                trim_html = ''
+                if 'trim_dimensions_cm' in page_details:
+                    trim_html = f'<div class="trim-info">Al vivo: {page_details["trim_dimensions_cm"]} cm &nbsp; {trim_area_sqm_val:.3f} m²</div>'
+                
+                page_indicator_span = f'<span class="page-indicator" style="--bg-color: {current_color}; background-color: {current_color};">Pag. {page_num + 1}/{page_count}</span>' if page_count > 1 else ''
+                
+                source_html += f"""<div class="item" data-folder-id="{folder_id}">
+                    <input type="checkbox" class="item-checkbox" checked>
+                    <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima"></div>
+                    <div class="item-info">
+                        <div class="metadata">{dims_html}{trim_html}</div>
+                        <div class="filename-container">
+                            <span class="filename">{html.escape(item_data["filename"])}</span>
                         </div>
-                        <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
-                    </div>"""
-
-                except Exception as e: 
-                    print(f"Errore anteprima per {full_path}, pag {page_num + 1}: {e}")
-                    img = self._create_placeholder_image((200, 150), "Anteprima non disponibile")
-                    img_buffer = io.BytesIO()
-                    img.save(img_buffer, format='PNG')
-                    img_data = img_buffer.getvalue()
-                    b64_img = base64.b64encode(img_data).decode('utf-8')
-                    img_src = f"data:image/png;base64,{b64_img}"
-                    source_html += f"""<div class="item" data-folder-id="{folder_id}">
-                        <input type="checkbox" class="item-checkbox" checked>
-                        <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima non disponibile"></div>
-                        <div class="item-info">
-                            <div class="item-info-header">
-                                <span class="filename">{html.escape(item_data["filename"])}</span>
-                            </div>
-                            <div class="metadata">Anteprima non disponibile</div>
-                        </div>
-                        <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
-                    </div>"""
+                        <div class="item-info-header">{page_indicator_span}</div>
+                    </div>
+                    <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
+                </div>"""
             source_html += '</div>'
 
         body = f"""<body>
@@ -1644,3 +1669,4 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
+

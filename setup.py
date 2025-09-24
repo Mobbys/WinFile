@@ -4,7 +4,7 @@ import matplotlib # Importato per trovare la sua cartella dati
 
 # --- Dati dell'applicazione ---
 APP_NAME = "WinFile"
-APP_VERSION = "4.0"
+APP_VERSION = "4.2"
 
 # --- Opzioni di Base ---
 # Queste sono le librerie che il tuo programma usa.
@@ -62,4 +62,3 @@ setup(
         icon="icona.ico"
     )]
 )
-
