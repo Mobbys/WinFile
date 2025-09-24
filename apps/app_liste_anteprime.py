@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.6.3 (Fix Sfondo Stampa Veloce)
+# app_liste_anteprime.py - v4.7.0 (Breadcrumbs)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -366,11 +366,22 @@ class FileScannerApp(ctk.CTkFrame):
         else: self.repopulate_treeview()
 
     def _get_display_path(self, file_info):
+        # --- MODIFICA INIZIO: Percorso a briciole di pane ---
         scan_root = file_info.get('scan_root', '')
         file_dir = file_info['path']
+        
         if not scan_root or os.path.normpath(file_dir) == os.path.normpath(scan_root):
             return "."
-        return os.path.basename(file_dir)
+        
+        try:
+            # Calcola il percorso relativo
+            relative_path = os.path.relpath(file_dir, scan_root)
+            # Sostituisce il separatore di sistema con " > "
+            return relative_path.replace(os.path.sep, ' > ')
+        except ValueError:
+            # Fallback nel caso in cui le cartelle siano su drive diversi (es. C: e D:)
+            return os.path.basename(file_dir)
+        # --- MODIFICA FINE ---
 
     def repopulate_treeview(self):
         selection = self.tree.selection()
@@ -672,7 +683,11 @@ class FileScannerApp(ctk.CTkFrame):
 
             .subfolder-separator-container { width: 100%; display: flex; align-items: center; gap: 10px; margin: 15px 0 5px 0; }
             .subfolder-separator { flex-grow: 1; border: 0; border-top: 1px solid #ccc; }
-            .subfolder-name { font-size: 0.9em; font-weight: bold; color: #555; background-color: #d2d2d2 !important; padding: 0 5px; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            /* --- MODIFICA INIZIO: Stili per Breadcrumbs --- */
+            .breadcrumb-container { display: flex; align-items: center; gap: 5px; }
+            .breadcrumb-crumb { padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .breadcrumb-separator { font-weight: bold; color: #555; }
+            /* --- MODIFICA FINE --- */
             .subfolder-stats { font-size: 0.8em; color: #666; white-space: nowrap; }
             
             .page-content.page-layout .folder-header, .page-content.page-layout .folder-annotation, .page-content.page-layout .subfolder-separator-container { flex-basis: 100%; }
@@ -1032,6 +1047,7 @@ class FileScannerApp(ctk.CTkFrame):
             for page_data in pages:
                 current_subfolder = self._get_display_path(page_data['file_info'])
                 if current_subfolder != last_subfolder and current_subfolder != ".":
+                    # --- MODIFICA INIZIO: Generazione Breadcrumbs HTML ---
                     stats = subfolder_stats[current_subfolder]
                     num_files = len(stats['files'])
                     total_pages = stats['pages']
@@ -1042,11 +1058,22 @@ class FileScannerApp(ctk.CTkFrame):
                     if abs(total_sqm - total_trim_sqm) > 0.0001:
                         stats_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
 
+                    breadcrumb_html = '<div class="breadcrumb-container">'
+                    crumbs = current_subfolder.split(' > ')
+                    breadcrumb_colors = ['#4A90E2', '#50E3C2', '#F5A623', '#BD10E0', '#9013FE']
+                    for i, crumb in enumerate(crumbs):
+                        color = breadcrumb_colors[i % len(breadcrumb_colors)]
+                        breadcrumb_html += f'<span class="breadcrumb-crumb" style="background-color: {color};">{html.escape(crumb)}</span>'
+                        if i < len(crumbs) - 1:
+                            breadcrumb_html += '<span class="breadcrumb-separator">&gt;</span>'
+                    breadcrumb_html += '</div>'
+
                     source_html += f'''<div class="subfolder-separator-container">
-                        <span class="subfolder-name">{html.escape(current_subfolder)}</span>
+                        {breadcrumb_html}
                         <hr class="subfolder-separator">
                         <span class="subfolder-stats">{stats_text}</span>
                     </div>'''
+                    # --- MODIFICA FINE ---
                 last_subfolder = current_subfolder
 
                 item_data, page_num = page_data['file_info'], page_data['page_num']
