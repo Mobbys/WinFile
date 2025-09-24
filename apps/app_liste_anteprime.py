@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.9.3 (Generazione Parallela)
+# app_liste_anteprime.py - v4.9.5 (Aumento Risoluzione Anteprime)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -604,9 +604,7 @@ class FileScannerApp(ctk.CTkFrame):
         if not pages_to_export:
             return messagebox.showinfo("Informazione", "Nessun dato da esportare.", parent=self)
         
-        # --- MODIFICA INIZIO: Rimosso dialogo, impostata qualità "fast" di default ---
         quality = 'fast'
-        # --- MODIFICA FINE ---
 
         self._lock_ui()
         self.status_text.set("Preparazione anteprima miniature...")
@@ -638,7 +636,6 @@ class FileScannerApp(ctk.CTkFrame):
         self._unlock_ui(); self.update()
         messagebox.showerror("Errore", f"Impossibile creare l'anteprima.\n{e}", parent=self)
 
-    # --- MODIFICA INIZIO: Funzione helper per la generazione parallela di una miniatura ---
     def _generate_single_thumbnail(self, task_args):
         page_data, pdf_dpi, img_thumb_size = task_args
         item_data, page_num = page_data['file_info'], page_data['page_num']
@@ -653,11 +650,20 @@ class FileScannerApp(ctk.CTkFrame):
                 img_data = img_buffer.getvalue()
             elif item_data['type'] in ('PDF', 'AI'):
                 with fitz.open(full_path) as doc_pdf:
-                    img_data = doc_pdf.load_page(page_num).get_pixmap(dpi=pdf_dpi).tobytes("png")
+                    pix = doc_pdf.load_page(page_num).get_pixmap(dpi=pdf_dpi)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    # --- MODIFICA INIZIO: Ridimensiona l'immagine dal PDF ---
+                    img.thumbnail(img_thumb_size, Image.Resampling.LANCZOS)
+                    # --- MODIFICA FINE ---
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='PNG')
+                    img_data = img_buffer.getvalue()
             else:
                 with Image.open(full_path) as img:
-                    img.thumbnail(img_thumb_size); img_buffer = io.BytesIO()
-                    img.save(img_buffer, format='PNG'); img_data = img_buffer.getvalue()
+                    img.thumbnail(img_thumb_size, Image.Resampling.LANCZOS)
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format='PNG')
+                    img_data = img_buffer.getvalue()
             
             return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
         except Exception as e:
@@ -667,7 +673,6 @@ class FileScannerApp(ctk.CTkFrame):
             img.save(img_buffer, format='PNG')
             img_data = img_buffer.getvalue()
             return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
-    # --- MODIFICA FINE ---
 
     def _generate_html_content(self, pages_to_export, quality):
         grouped_pages = defaultdict(list)
@@ -688,12 +693,14 @@ class FileScannerApp(ctk.CTkFrame):
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         """
         
+        # --- MODIFICA INIZIO: Aggiornamento parametri risoluzione ---
         if quality == 'fast':
             pdf_dpi = 72
-            img_thumb_size = (300, 300)
+            img_thumb_size = (750, 750)
         else: # high quality
             pdf_dpi = 150
-            img_thumb_size = (600, 600)
+            img_thumb_size = (750, 750)
+        # --- MODIFICA FINE ---
 
         css = """<style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
@@ -1095,11 +1102,9 @@ class FileScannerApp(ctk.CTkFrame):
             
             pages.sort(key=lambda p: (self._get_display_path(p['file_info']) != ".", self._get_display_path(p['file_info'])))
             
-            # --- MODIFICA INIZIO: Generazione parallela delle miniature ---
             tasks = [(p, pdf_dpi, img_thumb_size) for p in pages]
             with ThreadPoolExecutor() as executor:
                 b64_images = list(executor.map(self._generate_single_thumbnail, tasks))
-            # --- MODIFICA FINE ---
 
             last_subfolder = None
             for i, page_data in enumerate(pages):
