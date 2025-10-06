@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.9.5 (Aumento Risoluzione Anteprime)
+# app_liste_anteprime.py - v4.9.7 (Aggiunto Selettore Misure al Vivo)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -652,9 +652,7 @@ class FileScannerApp(ctk.CTkFrame):
                 with fitz.open(full_path) as doc_pdf:
                     pix = doc_pdf.load_page(page_num).get_pixmap(dpi=pdf_dpi)
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                    # --- MODIFICA INIZIO: Ridimensiona l'immagine dal PDF ---
                     img.thumbnail(img_thumb_size, Image.Resampling.LANCZOS)
-                    # --- MODIFICA FINE ---
                     img_buffer = io.BytesIO()
                     img.save(img_buffer, format='PNG')
                     img_data = img_buffer.getvalue()
@@ -693,14 +691,12 @@ class FileScannerApp(ctk.CTkFrame):
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         """
         
-        # --- MODIFICA INIZIO: Aggiornamento parametri risoluzione ---
         if quality == 'fast':
             pdf_dpi = 72
             img_thumb_size = (750, 750)
         else: # high quality
             pdf_dpi = 150
-            img_thumb_size = (750, 750)
-        # --- MODIFICA FINE ---
+            img_thumb_size = (1500, 1500)
 
         css = """<style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
@@ -783,6 +779,7 @@ class FileScannerApp(ctk.CTkFrame):
             #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
             
             body.annotations-hidden .annotation-area { display: none !important; }
+            body.trim-hidden .trim-info { display: none !important; }
             .switch { position: relative; display: inline-block; width: 40px; height: 20px; vertical-align: middle;}
             .switch input { opacity: 0; width: 0; height: 0; }
             .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
@@ -832,6 +829,10 @@ class FileScannerApp(ctk.CTkFrame):
 
             function toggleAnnotationsVisibility(hide) {
                 document.body.classList.toggle('annotations-hidden', hide);
+            }
+
+            function toggleTrimVisibility(hide) {
+                document.body.classList.toggle('trim-hidden', hide);
             }
 
             function renderAllPages() {
@@ -1210,12 +1211,21 @@ class FileScannerApp(ctk.CTkFrame):
                     <input type="range" id="zoom-slider" min="100" max="1600" value="200" oninput="setZoom(this.value)">
                     <button onclick="changeSize(1)" title="Ingrandisci">+</button>
                 </div>
-                <div class="control-group" style="margin-left: auto;">
-                    <label for="toggle-annotations-cb" style="cursor:pointer; user-select: none;">Nascondi Annotazioni</label>
-                    <label class="switch">
-                        <input type="checkbox" id="toggle-annotations-cb" onchange="toggleAnnotationsVisibility(this.checked)">
-                        <span class="slider"></span>
-                    </label>
+                <div class="control-group" style="margin-left: auto; display: flex; gap: 15px;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="toggle-trim-cb" style="cursor:pointer; user-select: none;">Nascondi misure al vivo</label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-trim-cb" onchange="toggleTrimVisibility(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="toggle-annotations-cb" style="cursor:pointer; user-select: none;">Nascondi Annotazioni</label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-annotations-cb" onchange="toggleAnnotationsVisibility(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                 </div>
             </div>
             <div id="view-container"></div>
