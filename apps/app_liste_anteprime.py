@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.9.7 (Aggiunto Selettore Misure al Vivo)
+# app_liste_anteprime.py - v4.9.8 (Aggiunto Selettore Misure Normali)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -780,6 +780,7 @@ class FileScannerApp(ctk.CTkFrame):
             
             body.annotations-hidden .annotation-area { display: none !important; }
             body.trim-hidden .trim-info { display: none !important; }
+            body.normal-hidden .normal-info { display: none !important; }
             .switch { position: relative; display: inline-block; width: 40px; height: 20px; vertical-align: middle;}
             .switch input { opacity: 0; width: 0; height: 0; }
             .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
@@ -833,6 +834,10 @@ class FileScannerApp(ctk.CTkFrame):
 
             function toggleTrimVisibility(hide) {
                 document.body.classList.toggle('trim-hidden', hide);
+            }
+
+            function toggleNormalVisibility(hide) {
+                document.body.classList.toggle('normal-hidden', hide);
             }
 
             function renderAllPages() {
@@ -1155,7 +1160,7 @@ class FileScannerApp(ctk.CTkFrame):
                 area_sqm_val = page_details.get('area_sqm', 0)
                 trim_area_sqm_val = page_details.get('trim_area_sqm', area_sqm_val)
                 
-                dims_html = f'<span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span>'
+                dims_html = f'<div class="normal-info"><span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span></div>'
                 trim_html = ''
                 if 'trim_dimensions_cm' in page_details:
                     trim_html = f'<div class="trim-info">Al vivo: {page_details["trim_dimensions_cm"]} cm &nbsp; {trim_area_sqm_val:.3f} m²</div>'
@@ -1212,6 +1217,13 @@ class FileScannerApp(ctk.CTkFrame):
                     <button onclick="changeSize(1)" title="Ingrandisci">+</button>
                 </div>
                 <div class="control-group" style="margin-left: auto; display: flex; gap: 15px;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="toggle-normal-cb" style="cursor:pointer; user-select: none;">Nascondi misure normali</label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-normal-cb" onchange="toggleNormalVisibility(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
                         <label for="toggle-trim-cb" style="cursor:pointer; user-select: none;">Nascondi misure al vivo</label>
                         <label class="switch">
@@ -1684,4 +1696,3 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
-
