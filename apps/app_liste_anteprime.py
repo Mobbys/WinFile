@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v5.0.12 (Fix definitivo salvataggio testi)
+# app_liste_anteprime.py - v5.0.16 (Fix definitivo layout Elenco A4)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -798,9 +798,9 @@ class FileScannerApp(ctk.CTkFrame):
             
             .page-content.page-layout .item { width: var(--item-width); }
             .page-content.grid-layout .item-img-container { height: calc(var(--item-width) * 0.75); }
-            .page-content.list-layout .item { flex-direction: row; align-items: center; width: 100%; }
-            .page-content.list-layout .item-img-container { width: calc(var(--item-width) / 2.5); height: calc(var(--item-width) / 2.5); border-right: 1px solid #ccc; border-bottom: none; }
-            .page-content.list-layout .item-info { flex-grow: 1; border: none; }
+            .page-content.list-layout .item { flex-direction: row; align-items: stretch; width: 100%; }
+            .page-content.list-layout .item-img-container { width: calc(var(--item-width)); max-height: 300px; flex-shrink: 0; border-right: 1px solid #ccc; border-bottom: none; padding: 5px; box-sizing: border-box; }
+            .page-content.list-layout .item-info { flex-grow: 1; border: none; justify-content: center; }
             
             .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px; color: red;}
             #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
@@ -1990,4 +1990,3 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
-
