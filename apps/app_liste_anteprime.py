@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v5.0.9 (Titolo Cartella Editabile)
+# app_liste_anteprime.py - v5.0.12 (Fix definitivo salvataggio testi)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -860,6 +860,28 @@ class FileScannerApp(ctk.CTkFrame):
                 'A3': { width: '29.7cm', height: '42cm' }
             };
 
+            function syncStateToSource() {
+                const viewContainer = document.getElementById('view-container');
+                const sourceData = document.getElementById('source-data');
+                if (!viewContainer || !sourceData) return;
+
+                // Sync inputs by updating the value attribute
+                viewContainer.querySelectorAll('input.folder-path-input').forEach(visibleInput => {
+                    const sourceInput = sourceData.querySelector(`#${CSS.escape(visibleInput.id)}`);
+                    if (sourceInput) {
+                        sourceInput.setAttribute('value', visibleInput.value);
+                    }
+                });
+
+                // Sync textareas by updating their textContent, which is copied by cloneNode
+                viewContainer.querySelectorAll('textarea.folder-annotation, textarea.annotation-area').forEach(visibleTextarea => {
+                    const sourceTextarea = sourceData.querySelector(`#${CSS.escape(visibleTextarea.id)}`);
+                    if (sourceTextarea) {
+                        sourceTextarea.textContent = visibleTextarea.value;
+                    }
+                });
+            }
+
             function updatePageLayout() {
                 const size = document.getElementById('page-size-select').value;
                 const dimensions = pageSizes[size];
@@ -901,7 +923,8 @@ class FileScannerApp(ctk.CTkFrame):
                 folders.forEach(folder => {
                     if (folder.style.display === 'none') return;
                     
-                    const folderName = folder.querySelector('.folder-path-input')?.value || 'Cartella Sconosciuta';
+                    const folderNameInput = folder.querySelector('.folder-path-input');
+                    const folderName = folderNameInput ? folderNameInput.getAttribute('value') : 'Cartella Sconosciuta';
                     listHtml += `<li><strong>${folderName}</strong>`;
 
                     const subfolderSections = new Map();
@@ -957,6 +980,7 @@ class FileScannerApp(ctk.CTkFrame):
             }
 
             function renderAllPages() {
+                syncStateToSource();
                 const viewContainer = document.getElementById('view-container');
                 viewContainer.innerHTML = '';
                 
@@ -991,7 +1015,10 @@ class FileScannerApp(ctk.CTkFrame):
                     if (firstVisibleFolder) {
                         const firstFolderHeader = firstVisibleFolder.querySelector('.folder-header').cloneNode(true);
                         const input = firstFolderHeader.querySelector('.folder-path-input');
-                        if(input) input.value = document.getElementById(input.id).value;
+                        if(input) {
+                            const sourceInput = document.getElementById(input.id);
+                            input.value = sourceInput ? sourceInput.getAttribute('value') : '';
+                        }
                         contentWrapper.appendChild(firstFolderHeader);
                     }
                     
@@ -1095,9 +1122,13 @@ class FileScannerApp(ctk.CTkFrame):
                                contentWrapper.className = `page-content ${state.view}-layout`;
                             }
                         }
+
                         if(child.classList.contains('folder-header')){
                             const input = child.querySelector('.folder-path-input');
-                            if(input) input.value = document.getElementById(input.id).value;
+                            if(input) {
+                                const sourceInput = document.getElementById(input.id);
+                                input.value = sourceInput ? sourceInput.getAttribute('value') : '';
+                            }
                         }
                         contentWrapper.appendChild(child);
                         if (pageContentHeight > 0 && contentWrapper.scrollHeight > pageContentHeight) {
@@ -1320,27 +1351,15 @@ class FileScannerApp(ctk.CTkFrame):
             }
 
             document.addEventListener("DOMContentLoaded", () => {
-                let itemCounter = 0;
-                document.querySelectorAll('.item').forEach(item => item.id = `item-${itemCounter++}`);
                 document.getElementById('zoom-slider').value = state.itemWidth;
                 updatePageLayout(); // Chiamata iniziale
                 switchView('grid');
-
-                // Sync folder name edits
-                document.getElementById('source-data').addEventListener('input', (e) => {
-                    if (e.target.classList.contains('folder-path-input')) {
-                        const sourceId = e.target.id;
-                        const destInput = document.querySelector(`#view-container #${sourceId}`);
-                        if (destInput) {
-                            destInput.value = e.target.value;
-                        }
-                    }
-                });
             });
         </script>"""
         
         source_html = ""
         sorted_grouped_pages = sorted(grouped_pages.items(), key=lambda item: item[0])
+        item_counter = 0
 
         for folder_idx, (folder, pages) in enumerate(sorted_grouped_pages):
             display_folder = os.path.basename(folder)
@@ -1434,7 +1453,7 @@ class FileScannerApp(ctk.CTkFrame):
                 
                 page_indicator_span = f'<span class="page-indicator" style="--bg-color: {current_color}; background-color: {current_color};">Pag. {page_num + 1}/{page_count}</span>' if page_count > 1 else ''
                 
-                source_html += f"""<div class="item" data-folder-id="{folder_id}">
+                source_html += f"""<div class="item" id="item-{item_counter}" data-folder-id="{folder_id}">
                     <input type="checkbox" class="item-checkbox" checked>
                     <div class="item-img-container"><img class="item-img" src="{img_src}" alt="Anteprima"></div>
                     <div class="item-info">
@@ -1444,8 +1463,9 @@ class FileScannerApp(ctk.CTkFrame):
                         </div>
                         <div class="item-info-header">{page_indicator_span}</div>
                     </div>
-                    <textarea class="annotation-area" placeholder="Annotazione..."></textarea>
+                    <textarea class="annotation-area" id="item-anno-{item_counter}" placeholder="Annotazione..."></textarea>
                 </div>"""
+                item_counter += 1
             source_html += '</div>'
 
         body = f"""<body>
@@ -1970,3 +1990,4 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
+

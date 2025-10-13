@@ -4,7 +4,7 @@ import matplotlib # Importato per trovare la sua cartella dati
 
 # --- Dati dell'applicazione ---
 APP_NAME = "WinFile"
-APP_VERSION = "4.3"
+APP_VERSION = "4.7"
 
 # --- Opzioni di Base ---
 # Queste sono le librerie che il tuo programma usa.
