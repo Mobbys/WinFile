@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v4.9.8 (Aggiunto Selettore Misure Normali)
+# app_liste_anteprime.py - v5.0.9 (Titolo Cartella Editabile)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -719,9 +719,36 @@ class FileScannerApp(ctk.CTkFrame):
             .page.landscape { width: var(--a4-height); height: var(--a4-width); }
             .page-content { padding: 1cm; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; height: calc(100% - 2cm); width: calc(100% - 2cm); overflow: hidden; }
             
-            .folder-header{background-color:#e0e0e0;padding:10px 15px;border-left:5px solid #4285f4;overflow:hidden;border-radius:0 5px 5px 0;width:100%;box-sizing:border-box;margin-bottom:5px;}
-            .folder-path{font-weight:700;font-size:1.2em;float:left}
-            .folder-stats{float:right;font-size:.9em;color:#555;line-height:1.5em}
+            .folder-header{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background-color:#e0e0e0;
+                padding:10px 15px;
+                border-left:5px solid #4285f4;
+                border-radius:0 5px 5px 0;
+                width:100%;
+                box-sizing:border-box;
+                margin-bottom:5px;
+            }
+            .folder-path-input {
+                font-family: 'Roboto', sans-serif;
+                font-weight: 700;
+                font-size: 1.2em;
+                color: #333;
+                border: none;
+                background: transparent;
+                padding: 2px 5px;
+                margin: -2px -5px; /* Counteract padding to keep alignment */
+                width: 70%;
+                border-radius: 3px;
+            }
+            .folder-path-input:focus {
+                outline: none;
+                background: #fff;
+                box-shadow: 0 0 0 2px #4285f4;
+            }
+            .folder-stats{font-size:.9em;color:#555;line-height:1.5em; text-align: right;}
 
             .subfolder-separator-container { width: 100%; display: flex; align-items: center; gap: 10px; margin: 15px 0 5px 0; }
             .subfolder-separator { flex-grow: 1; border: 0; border-top: 1px solid #ccc; }
@@ -778,6 +805,27 @@ class FileScannerApp(ctk.CTkFrame):
             .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px; color: red;}
             #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
             
+            .summary-container { 
+                font-size: 12px;
+                width: 100%; 
+                box-sizing: border-box;
+            }
+            .summary-container h2 { margin-top: 0; border-bottom: 2px solid #ccc; padding-bottom: 8px; font-size: 1.8em; }
+            .summary-list-wrapper {
+                column-count: 1;
+                column-gap: 2em;
+            }
+            .summary-list-wrapper.two-columns {
+                column-count: 2;
+            }
+            .summary-container ul { list-style-type: none; padding-left: 0; margin: 0; }
+            .summary-container > ul > li { margin-bottom: 15px; font-size: 1.3em; break-inside: avoid; }
+            .summary-container ul ul { padding-left: 20px; margin-top: 6px; }
+            .summary-container ul ul li { font-weight: bold; font-size: 0.9em; }
+            .summary-container ul ul ul { list-style-type: '- '; padding-left: 20px; }
+            .summary-container ul ul ul li { padding: 3px 0; font-size: 1.1em; color: #333; font-weight: normal;}
+            .summary-container ul ul ul li small { color: #555; font-size: 0.9em; }
+
             body.annotations-hidden .annotation-area { display: none !important; }
             body.trim-hidden .trim-info { display: none !important; }
             body.normal-hidden .normal-info { display: none !important; }
@@ -804,6 +852,7 @@ class FileScannerApp(ctk.CTkFrame):
             const state = {
                 view: 'grid', 
                 itemWidth: 200, 
+                pageBreakOnSubfolder: false,
             };
             
             const pageSizes = {
@@ -840,6 +889,73 @@ class FileScannerApp(ctk.CTkFrame):
                 document.body.classList.toggle('normal-hidden', hide);
             }
 
+            function togglePageBreak(enabled) {
+                state.pageBreakOnSubfolder = enabled;
+                renderAllPages();
+            }
+
+            function generateSummaryHTML(sourceNode) {
+                let listHtml = '<ul>';
+                const folders = sourceNode.querySelectorAll('.folder-container');
+                
+                folders.forEach(folder => {
+                    if (folder.style.display === 'none') return;
+                    
+                    const folderName = folder.querySelector('.folder-path-input')?.value || 'Cartella Sconosciuta';
+                    listHtml += `<li><strong>${folderName}</strong>`;
+
+                    const subfolderSections = new Map();
+                    let currentSectionName = 'File nella cartella principale';
+                    let currentSectionItems = [];
+
+                    Array.from(folder.children).forEach(child => {
+                        if (child.classList.contains('subfolder-separator-container')) {
+                            if (currentSectionItems.length > 0) {
+                                subfolderSections.set(currentSectionName, currentSectionItems);
+                            }
+                            const breadcrumbs = Array.from(child.querySelectorAll('.breadcrumb-crumb')).map(c => c.textContent).join(' > ');
+                            currentSectionName = breadcrumbs || 'Sottocartella';
+                            if (currentSectionName === 'File nella cartella principale') {
+                                const rootBreadcrumb = child.querySelector('.breadcrumb-crumb');
+                                if (rootBreadcrumb) currentSectionName = rootBreadcrumb.textContent;
+                            }
+                            currentSectionItems = [];
+                        } else if (child.classList.contains('item') && child.style.display !== 'none') {
+                            currentSectionItems.push(child);
+                        }
+                    });
+                    if (currentSectionItems.length > 0) {
+                        subfolderSections.set(currentSectionName, currentSectionItems);
+                    }
+
+                    if (subfolderSections.size > 0) {
+                        listHtml += '<ul>';
+                        subfolderSections.forEach((items, name) => {
+                             const visibleItems = items.filter(item => item.style.display !== 'none');
+                             if(visibleItems.length > 0) {
+                                listHtml += `<li>${name}<ul>`;
+                                visibleItems.forEach(item => {
+                                    const filename = item.querySelector('.filename')?.textContent || '';
+                                    const pageIndicator = item.querySelector('.page-indicator')?.textContent || '';
+                                    listHtml += `<li>${filename} ${pageIndicator}</li>`;
+                                });
+                                listHtml += '</ul></li>';
+                             }
+                        });
+                        listHtml += '</ul>';
+                    }
+                    listHtml += '</li>';
+                });
+
+                listHtml += '</ul>';
+                
+                let html = `<div class="summary-container">
+                                <h2>Riepilogo Contenuto</h2>
+                                <div class="summary-list-wrapper">${listHtml}</div>
+                            </div>`;
+                return html;
+            }
+
             function renderAllPages() {
                 const viewContainer = document.getElementById('view-container');
                 viewContainer.innerHTML = '';
@@ -850,31 +966,153 @@ class FileScannerApp(ctk.CTkFrame):
 
                 if (folders.length === 0) return;
 
-                let currentPage = createNewPage();
-                viewContainer.appendChild(currentPage);
-                let contentWrapper = currentPage.querySelector('.page-content');
-                contentWrapper.className = `page-content ${state.view}-layout`;
-                const contentHeight = contentWrapper.clientHeight;
+                let currentPage, contentWrapper;
+                let pageContentHeight = 0; 
+
+                const setupNewPage = () => {
+                    currentPage = createNewPage();
+                    viewContainer.appendChild(currentPage);
+                    contentWrapper = currentPage.querySelector('.page-content');
+                    contentWrapper.className = `page-content`; // Default to no special layout
+                    if (pageContentHeight === 0) {
+                        pageContentHeight = contentWrapper.clientHeight;
+                    }
+                };
                 
+                const hasSubfolders = Array.from(sourceData.querySelectorAll('.subfolder-separator-container')).some(el => {
+                    const parentFolder = el.closest('.folder-container');
+                    return parentFolder && parentFolder.style.display !== 'none';
+                });
+
+                if (state.pageBreakOnSubfolder && hasSubfolders) {
+                    setupNewPage();
+
+                    const firstVisibleFolder = Array.from(folders).find(f => f.style.display !== 'none');
+                    if (firstVisibleFolder) {
+                        const firstFolderHeader = firstVisibleFolder.querySelector('.folder-header').cloneNode(true);
+                        const input = firstFolderHeader.querySelector('.folder-path-input');
+                        if(input) input.value = document.getElementById(input.id).value;
+                        contentWrapper.appendChild(firstFolderHeader);
+                    }
+                    
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.innerHTML = generateSummaryHTML(contentToLayout);
+                    
+                    const summaryWrapper = summaryDiv.querySelector('.summary-list-wrapper');
+                    
+                    contentWrapper.appendChild(summaryDiv);
+                    
+                    if (summaryWrapper.scrollHeight > pageContentHeight) {
+                        summaryWrapper.classList.add('two-columns');
+                    }
+                    
+                    // Paginate the summary itself if it still overflows
+                    while (contentWrapper.scrollHeight > pageContentHeight) {
+                        const allLIs = Array.from(contentWrapper.querySelectorAll('.summary-container li'));
+                        let lastVisibleLI = null;
+
+                        for(let i = allLIs.length - 1; i >= 0; i--) {
+                            const li = allLIs[i];
+                            if (li.offsetTop < pageContentHeight) {
+                                lastVisibleLI = li;
+                                break;
+                            }
+                        }
+
+                        if (!lastVisibleLI) { 
+                            break;
+                        }
+
+                        let breakList = lastVisibleLI.parentElement;
+                        const itemsToMove = [];
+                        let sibling = lastVisibleLI.nextElementSibling;
+                        while(sibling) {
+                            itemsToMove.push(sibling);
+                            sibling = sibling.nextElementSibling;
+                        }
+                        
+                        setupNewPage();
+                        contentWrapper.className = 'page-content'; 
+                        const newList = breakList.cloneNode(false);
+                        itemsToMove.forEach(item => {
+                            newList.appendChild(item);
+                        });
+
+                        let currentNewList = newList;
+                        let currentOldList = breakList;
+                        while(currentOldList.parentElement && currentOldList.parentElement.closest('.summary-container')) {
+                             const newParentList = currentOldList.parentElement.cloneNode(false);
+                             newParentList.appendChild(currentNewList);
+                             currentNewList = newParentList;
+                             
+                             let parentSibling = currentOldList.parentElement.nextElementSibling;
+                             while(parentSibling){
+                                currentNewList.appendChild(parentSibling);
+                                parentSibling = parentSibling.nextElementSibling;
+                             }
+                             currentOldList = currentOldList.parentElement;
+                        }
+                        contentWrapper.appendChild(currentNewList);
+                    }
+
+
+                    const hasVisibleItems = contentToLayout.querySelector(".item:not([style*='display: none'])");
+                    if (hasVisibleItems) {
+                        setupNewPage(); 
+                    } else {
+                        contentWrapper = null; 
+                    }
+                } else {
+                    setupNewPage(); 
+                }
+                
+                if (!contentWrapper) {
+                    initDragAndDrop();
+                    return;
+                }
+                
+                contentWrapper.className = `page-content ${state.view}-layout`;
+
                 for (const folder of folders) {
                     if(folder.style.display === 'none') continue;
                     
                     const childrenToProcess = Array.from(folder.children);
+                    const isFirstFolder = folder === folders.find(f => f.style.display !== 'none');
 
                     for (const child of childrenToProcess) {
                         if(child.style.display === 'none') continue;
-
+                        
+                        if(state.pageBreakOnSubfolder && hasSubfolders) {
+                            if (isFirstFolder && child.classList.contains('folder-header')) {
+                                continue;
+                            }
+                            if (!isFirstFolder && child.classList.contains('folder-header') && contentWrapper.children.length > 0) {
+                                setupNewPage();
+                                contentWrapper.className = `page-content ${state.view}-layout`;
+                            }
+                            if (child.classList.contains('subfolder-separator-container') && contentWrapper.querySelector('.item')) {
+                               setupNewPage();
+                               contentWrapper.className = `page-content ${state.view}-layout`;
+                            }
+                        }
+                        if(child.classList.contains('folder-header')){
+                            const input = child.querySelector('.folder-path-input');
+                            if(input) input.value = document.getElementById(input.id).value;
+                        }
                         contentWrapper.appendChild(child);
-                        if (contentWrapper.scrollHeight > contentHeight) {
+                        if (pageContentHeight > 0 && contentWrapper.scrollHeight > pageContentHeight) {
                             contentWrapper.removeChild(child);
-                            currentPage = createNewPage();
-                            viewContainer.appendChild(currentPage);
-                            contentWrapper = currentPage.querySelector('.page-content');
+                            setupNewPage();
                             contentWrapper.className = `page-content ${state.view}-layout`;
                             contentWrapper.appendChild(child);
                         }
                     }
                 }
+                
+                if (contentWrapper && contentWrapper.children.length === 0 && viewContainer.children.length > 1) {
+                    viewContainer.removeChild(currentPage);
+                }
+
                 initDragAndDrop();
             }
             
@@ -1000,6 +1238,13 @@ class FileScannerApp(ctk.CTkFrame):
                     for (const element of sourceElements) {
                         const contentToPrint = element.cloneNode(true);
                         
+                        contentToPrint.querySelectorAll('input.folder-path-input').forEach(input => {
+                            const newSpan = document.createElement('span');
+                            newSpan.className = 'folder-path-input'; // Keep class for styling
+                            newSpan.textContent = input.value;
+                            input.parentNode.replaceChild(newSpan, input);
+                        });
+
                         contentToPrint.querySelectorAll('.item:not([style*="display: none"])').forEach(clonedItem => {
                              const originalCheckbox = document.getElementById(clonedItem.id)?.querySelector('.item-checkbox');
                              if (originalCheckbox && !originalCheckbox.checked) {
@@ -1063,6 +1308,16 @@ class FileScannerApp(ctk.CTkFrame):
                     loader.style.display = 'none';
                 }
             }
+            
+            function syncInputValues(source, dest) {
+                const sourceInputs = source.querySelectorAll('input.folder-path-input');
+                const destInputs = dest.querySelectorAll('input.folder-path-input');
+                sourceInputs.forEach((sIn, i) => {
+                    if (destInputs[i]) {
+                        destInputs[i].value = sIn.value;
+                    }
+                });
+            }
 
             document.addEventListener("DOMContentLoaded", () => {
                 let itemCounter = 0;
@@ -1070,6 +1325,17 @@ class FileScannerApp(ctk.CTkFrame):
                 document.getElementById('zoom-slider').value = state.itemWidth;
                 updatePageLayout(); // Chiamata iniziale
                 switchView('grid');
+
+                // Sync folder name edits
+                document.getElementById('source-data').addEventListener('input', (e) => {
+                    if (e.target.classList.contains('folder-path-input')) {
+                        const sourceId = e.target.id;
+                        const destInput = document.querySelector(`#view-container #${sourceId}`);
+                        if (destInput) {
+                            destInput.value = e.target.value;
+                        }
+                    }
+                });
             });
         </script>"""
         
@@ -1089,10 +1355,11 @@ class FileScannerApp(ctk.CTkFrame):
                 folder_stats_text += f" (Al vivo: {total_trim_sqm:.2f} m²)"
 
             folder_id = f"folder-{folder_idx}"
+            input_id = f"folder-path-input-{folder_idx}"
             source_html += f"""<div class="folder-container" data-folder-id="{folder_id}">
                 <div class="folder-header">
+                    <input type="text" class="folder-path-input" id="{input_id}" value="{html.escape(display_folder)}">
                     <span class="folder-stats">{folder_stats_text}</span>
-                    <span class="folder-path">{html.escape(display_folder)}</span>
                 </div>
                 <textarea class="annotation-area folder-annotation" id="anno-{folder_id}" placeholder="Annotazione cartella..."></textarea>"""
             
@@ -1235,6 +1502,13 @@ class FileScannerApp(ctk.CTkFrame):
                         <label for="toggle-annotations-cb" style="cursor:pointer; user-select: none;">Nascondi Annotazioni</label>
                         <label class="switch">
                             <input type="checkbox" id="toggle-annotations-cb" onchange="toggleAnnotationsVisibility(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="toggle-page-break-cb" style="cursor:pointer; user-select: none;">Interruzione per sottocartella</label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-page-break-cb" onchange="togglePageBreak(this.checked)">
                             <span class="slider"></span>
                         </label>
                     </div>
