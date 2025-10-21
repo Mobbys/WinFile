@@ -1,4 +1,4 @@
-# app_liste_anteprime.py - v5.0.16 (Fix definitivo layout Elenco A4)
+# app_liste_anteprime.py - v5.0.20 (Aggiunta info CMYK/RGB in anteprima HTML)
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk, Menu
 import os
@@ -294,10 +294,14 @@ class FileScannerApp(ctk.CTkFrame):
             details = {"filename": os.path.basename(file_path), "type": ext.replace('.', '').upper(), "path": os.path.dirname(file_path)}
             if ext in ('.jpg', '.jpeg', '.tif', '.tiff', '.png'):
                 with Image.open(file_path) as img:
+                    color_mode = img.mode
                     w_px, h_px = img.size; dpi_x, dpi_y = img.info.get('dpi', (DEFAULT_DPI, DEFAULT_DPI))
                     w_cm = (w_px / (dpi_x or DEFAULT_DPI)) * 2.54; h_cm = (h_px / (dpi_y or DEFAULT_DPI)) * 2.54
                     area_sqm = (w_cm * h_cm) / 10000
-                    details.update({"w_px": w_px, "h_px": h_px, "page_count": 1, "pages_details": [{"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm, "area_sqm": area_sqm}], "dpi_str": f"{int(dpi_x or DEFAULT_DPI)} DPI"})
+                    details.update({"w_px": w_px, "h_px": h_px, "page_count": 1, 
+                                    "pages_details": [{"dimensions_cm": f"{w_cm:.2f} x {h_cm:.2f}", "width_cm": w_cm, "height_cm": h_cm, "area_sqm": area_sqm}], 
+                                    "dpi_str": f"{int(dpi_x or DEFAULT_DPI)} DPI",
+                                    "color_mode": color_mode})
                     return details
             elif ext in ('.pdf', '.ai'):
                 try:
@@ -523,6 +527,11 @@ class FileScannerApp(ctk.CTkFrame):
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             else: 
                 img = Image.open(full_path)
+                # --> INIZIO MODIFICA <--
+                # Se l'immagine non è in modalità RGB (es. CMYK, P), la convertiamo
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                # --> FINE MODIFICA <--
 
             img.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
             self.preview_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
@@ -658,6 +667,8 @@ class FileScannerApp(ctk.CTkFrame):
                     img_data = img_buffer.getvalue()
             else:
                 with Image.open(full_path) as img:
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
                     img.thumbnail(img_thumb_size, Image.Resampling.LANCZOS)
                     img_buffer = io.BytesIO()
                     img.save(img_buffer, format='PNG')
@@ -798,8 +809,8 @@ class FileScannerApp(ctk.CTkFrame):
             
             .page-content.page-layout .item { width: var(--item-width); }
             .page-content.grid-layout .item-img-container { height: calc(var(--item-width) * 0.75); }
-            .page-content.list-layout .item { flex-direction: row; align-items: stretch; width: 100%; }
-            .page-content.list-layout .item-img-container { width: calc(var(--item-width)); max-height: 300px; flex-shrink: 0; border-right: 1px solid #ccc; border-bottom: none; padding: 5px; box-sizing: border-box; }
+            .page-content.list-layout .item { flex-direction: row; align-items: stretch; width: 100%; height: calc(var(--item-width) * 0.75); }
+            .page-content.list-layout .item-img-container { width: calc(var(--item-width)); height: 100%; flex-shrink: 0; border-right: 1px solid #ccc; border-bottom: none; padding: 5px; box-sizing: border-box; }
             .page-content.list-layout .item-info { flex-grow: 1; border: none; justify-content: center; }
             
             .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px; color: red;}
@@ -1031,6 +1042,7 @@ class FileScannerApp(ctk.CTkFrame):
                     
                     if (summaryWrapper.scrollHeight > pageContentHeight) {
                         summaryWrapper.classList.add('two-columns');
+                        void summaryWrapper.offsetHeight;
                     }
                     
                     // Paginate the summary itself if it still overflows
@@ -1446,7 +1458,11 @@ class FileScannerApp(ctk.CTkFrame):
                 area_sqm_val = page_details.get('area_sqm', 0)
                 trim_area_sqm_val = page_details.get('trim_area_sqm', area_sqm_val)
                 
-                dims_html = f'<div class="normal-info"><span>{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span></div>'
+                color_mode_prefix = ""
+                if color_mode := item_data.get('color_mode'):
+                    color_mode_prefix = f"<strong>{html.escape(color_mode)}:</strong> "
+                
+                dims_html = f'<div class="normal-info"><span>{color_mode_prefix}{page_details["dimensions_cm"]} cm &nbsp; {area_sqm_val:.3f} m²</span></div>'
                 trim_html = ''
                 if 'trim_dimensions_cm' in page_details:
                     trim_html = f'<div class="trim-info">Al vivo: {page_details["trim_dimensions_cm"]} cm &nbsp; {trim_area_sqm_val:.3f} m²</div>'
@@ -1952,6 +1968,8 @@ class FileScannerApp(ctk.CTkFrame):
                                 img_report = ReportLabImage(io.BytesIO(img_data), width=col_width*0.9, height=col_width*0.9, kind='proportional')
                         else:
                             with Image.open(full_path) as img:
+                                if img.mode != 'RGB':
+                                    img = img.convert('RGB')
                                 img.thumbnail((400, 400)); img_buffer = io.BytesIO()
                                 img.save(img_buffer, format='PNG'); img_buffer.seek(0)
                                 img_report = ReportLabImage(img_buffer, width=col_width*0.9, height=col_width*0.9, kind='proportional')
@@ -1990,3 +2008,4 @@ def create_tab(tab_view):
     tab = tab_view.add(tab_name)
     app_instance = FileScannerApp(master=tab)
     return tab_name, app_instance
+
