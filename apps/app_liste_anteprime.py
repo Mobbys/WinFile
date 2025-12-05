@@ -711,7 +711,7 @@ class FileScannerApp(ctk.CTkFrame):
 
         css = """<style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
-            :root { --a4-width: 21cm; --a4-height: 29.7cm; --item-width: 200px; }
+            :root { --a4-width: 21cm; --a4-height: 29.7cm; --item-width: 200px; --annotation-font-size: 18px; }
             body{font-family:'Roboto',sans-serif;margin:0;background-color:#d2d2d2; color:#333;}
             .controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:#fff;padding:10px 20px;box-shadow:0 2px 4px #0000001a;position:sticky;top:0;z-index:1000}
             .controls button, .controls input, .controls select {padding:8px 12px;font-size:14px;border:1px solid #ccc;border-radius:5px;font-family:'Roboto',sans-serif;}
@@ -813,7 +813,7 @@ class FileScannerApp(ctk.CTkFrame):
             .page-content.list-layout .item-img-container { width: calc(var(--item-width)); height: 100%; flex-shrink: 0; border-right: 1px solid #ccc; border-bottom: none; padding: 5px; box-sizing: border-box; }
             .page-content.list-layout .item-info { flex-grow: 1; border: none; justify-content: center; }
             
-            .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:12px; color: red;}
+            .annotation-area{width:100% !important;box-sizing:border-box;margin:0;padding:5px;border:1px dashed #ccc;border-top: 1px solid #ccc;font-family:sans-serif;resize:vertical;min-height:40px;font-size:var(--annotation-font-size); color: red;}
             #loader {position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 2em; z-index: 2000;}
             
             .summary-container { 
@@ -864,6 +864,7 @@ class FileScannerApp(ctk.CTkFrame):
                 view: 'grid', 
                 itemWidth: 200, 
                 pageBreakOnSubfolder: false,
+                annotationFontSize: 18,
             };
             
             const pageSizes = {
@@ -1177,6 +1178,18 @@ class FileScannerApp(ctk.CTkFrame):
                 renderAllPages();
             }
 
+            function changeAnnotationSize(amount) {
+                state.annotationFontSize = Math.max(8, Math.min(40, state.annotationFontSize + amount));
+                const slider = document.getElementById('annotation-slider');
+                if (slider) slider.value = state.annotationFontSize;
+                document.documentElement.style.setProperty('--annotation-font-size', state.annotationFontSize + 'px');
+            }
+
+            function setAnnotationZoom(value) {
+                state.annotationFontSize = parseInt(value, 10);
+                document.documentElement.style.setProperty('--annotation-font-size', state.annotationFontSize + 'px');
+            }
+
             function setZoom(value) {
                 state.itemWidth = parseInt(value, 10);
                 document.documentElement.style.setProperty('--item-width', state.itemWidth + 'px');
@@ -1364,6 +1377,8 @@ class FileScannerApp(ctk.CTkFrame):
 
             document.addEventListener("DOMContentLoaded", () => {
                 document.getElementById('zoom-slider').value = state.itemWidth;
+                const annotationSlider = document.getElementById('annotation-slider');
+                if (annotationSlider) annotationSlider.value = state.annotationFontSize;
                 updatePageLayout(); // Chiamata iniziale
                 switchView('grid');
             });
@@ -1518,6 +1533,12 @@ class FileScannerApp(ctk.CTkFrame):
                     <button onclick="changeSize(-1)" title="Rimpicciolisci">-</button>
                     <input type="range" id="zoom-slider" min="100" max="1600" value="200" oninput="setZoom(this.value)">
                     <button onclick="changeSize(1)" title="Ingrandisci">+</button>
+                </div>
+                <div class="control-group">
+                    <label>Testo Note:</label>
+                    <button onclick="changeAnnotationSize(-1)" title="Rimpicciolisci">-</button>
+                    <input type="range" id="annotation-slider" min="8" max="40" value="18" oninput="setAnnotationZoom(this.value)">
+                    <button onclick="changeAnnotationSize(1)" title="Ingrandisci">+</button>
                 </div>
                 <div class="control-group" style="margin-left: auto; display: flex; gap: 15px;">
                     <div style="display: flex; align-items: center; gap: 5px;">
